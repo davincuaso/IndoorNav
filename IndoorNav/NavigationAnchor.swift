@@ -2,15 +2,15 @@ import ARKit
 
 /// Custom ARAnchor that carries a destination name (e.g. "Meeting Room").
 /// Conforms to NSSecureCoding so it persists inside an ARWorldMap archive.
-class NavigationAnchor: ARAnchor {
+class NavigationAnchor: ARAnchor, @unchecked Sendable {
 
     static let nameKey = "destinationName"
 
     let destinationName: String
 
-    init(name destinationName: String, transform: simd_float4x4) {
-        self.destinationName = destinationName
-        super.init(name: destinationName, transform: transform)
+    override init(name: String, transform: simd_float4x4) {
+        self.destinationName = name
+        super.init(name: name, transform: transform)
     }
 
     // MARK: - ARAnchor copy contract
