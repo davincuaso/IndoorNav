@@ -22,7 +22,9 @@ class ARSessionManager: NSObject, ObservableObject {
 
     // MARK: - Published State (mapping)
 
-    @Published var droppedAnchors: [NavigationAnchor] = []
+    @Published var destinations: [NavigationAnchor] = []
+    @Published var waypointCount: Int = 0
+    @Published var isAutoWaypointEnabled = false
     @Published var isSavingMap = false
     @Published var mapSaveResult: String?
 
@@ -35,6 +37,11 @@ class ARSessionManager: NSObject, ObservableObject {
     @Published var navigationError: String?
     @Published var distanceToDestination: Float?
 
+    // MARK: - Published State (map management)
+
+    @Published var savedMapNames: [String] = []
+    @Published var selectedMapName: String?
+
     // MARK: - AR Objects
 
     let sceneView = ARSCNView()
@@ -43,7 +50,7 @@ class ARSessionManager: NSObject, ObservableObject {
 
     private let pathContainerNode = SCNNode()
     private var lastPathUpdateTime: TimeInterval = 0
-    private let pathSpacing: Float = 0.3
+    private let pathDotSpacing: Float = 0.25
 
     private lazy var pathDotGeometry: SCNSphere = {
         let s = SCNSphere(radius: 0.015)
@@ -61,12 +68,16 @@ class ARSessionManager: NSObject, ObservableObject {
         return c
     }()
 
-    // MARK: - File Storage
+    // MARK: - Auto-Waypoint State
 
-    static var worldMapURL: URL {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        return docs.appendingPathComponent("IndoorNavWorldMap.arexperience")
-    }
+    private var lastAutoWaypointPosition: SIMD3<Float>?
+    private let autoWaypointInterval: Float = 1.5
+    private var allMappingAnchors: [NavigationAnchor] = []
+
+    // MARK: - Navigation Path State
+
+    private var allLoadedAnchors: [NavigationAnchor] = []
+    private var currentPath: [SIMD3<Float>] = []
 
     // MARK: - Init
 
@@ -76,9 +87,24 @@ class ARSessionManager: NSObject, ObservableObject {
         sceneView.session.delegate = self
         sceneView.automaticallyUpdatesLighting = true
         sceneView.scene.rootNode.addChildNode(pathContainerNode)
+        refreshSavedMaps()
     }
 
-    // MARK: - Session Lifecycle
+    // MARK: - Map Management
+
+    func refreshSavedMaps() {
+        savedMapNames = MapStore.list()
+    }
+
+    func deleteMap(named name: String) {
+        try? MapStore.delete(name: name)
+        refreshSavedMaps()
+        if selectedMapName == name {
+            selectedMapName = nil
+        }
+    }
+
+    // MARK: - Session: Mapping
 
     func startMappingSession() {
         isRelocalized = false
@@ -86,10 +112,14 @@ class ARSessionManager: NSObject, ObservableObject {
         selectedDestination = nil
         navigationError = nil
         distanceToDestination = nil
+        currentPath = []
         clearPath()
 
-        droppedAnchors = []
+        destinations = []
+        allMappingAnchors = []
+        waypointCount = 0
         mapSaveResult = nil
+        lastAutoWaypointPosition = nil
 
         let config = ARWorldTrackingConfiguration()
         config.planeDetection = [.horizontal, .vertical]
@@ -102,37 +132,27 @@ class ARSessionManager: NSObject, ObservableObject {
 
         sceneView.debugOptions = [.showFeaturePoints]
         sceneView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
-        sessionInfoText = "Mapping — move around slowly"
+        sessionInfoText = "Mapping — walk the space slowly"
     }
 
-    func startNavigationSession() {
+    // MARK: - Session: Navigation
+
+    func startNavigationSession(mapName: String) {
         isRelocalized = false
         loadedDestinations = []
         selectedDestination = nil
         navigationError = nil
         distanceToDestination = nil
+        currentPath = []
         isLoadingMap = true
         clearPath()
-
-        guard savedMapExists else {
-            navigationError = "No saved map found. Map the space first."
-            sessionInfoText = "No map available"
-            isLoadingMap = false
-            return
-        }
+        selectedMapName = mapName
 
         do {
-            let data = try Data(contentsOf: Self.worldMapURL)
-            guard let worldMap = try NSKeyedUnarchiver.unarchivedObject(
-                ofClass: ARWorldMap.self, from: data
-            ) else {
-                navigationError = "Could not decode world map"
-                sessionInfoText = "Map load failed"
-                isLoadingMap = false
-                return
-            }
-
-            loadedDestinations = worldMap.anchors.compactMap { $0 as? NavigationAnchor }
+            let worldMap = try MapStore.load(name: mapName)
+            let navAnchors = worldMap.anchors.compactMap { $0 as? NavigationAnchor }
+            allLoadedAnchors = navAnchors
+            loadedDestinations = navAnchors.filter(\.isDestination)
 
             let config = ARWorldTrackingConfiguration()
             config.planeDetection = [.horizontal, .vertical]
@@ -146,10 +166,11 @@ class ARSessionManager: NSObject, ObservableObject {
             sceneView.debugOptions = [.showFeaturePoints]
             sceneView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
 
-            sessionInfoText = "Look around slowly to localize..."
+            let summary = MapStore.anchorSummary(for: worldMap)
+            sessionInfoText = "Look around to localize... (\(summary.destinations) dest, \(summary.waypoints) waypoints)"
             isLoadingMap = false
         } catch {
-            navigationError = "Failed to load map: \(error.localizedDescription)"
+            navigationError = "Failed to load \"\(mapName)\": \(error.localizedDescription)"
             sessionInfoText = "Map load failed"
             isLoadingMap = false
         }
@@ -159,30 +180,50 @@ class ARSessionManager: NSObject, ObservableObject {
         sceneView.session.pause()
     }
 
-    // MARK: - Mapping: Drop Anchor
+    // MARK: - Mapping: Destinations
 
-    func dropAnchor(named name: String) {
+    func dropDestination(named name: String) {
         guard let frame = sceneView.session.currentFrame else {
-            sessionInfoText = "Cannot drop anchor — no AR frame"
+            sessionInfoText = "Cannot drop — no AR frame"
             return
         }
-        let anchor = NavigationAnchor(name: name, transform: frame.camera.transform)
+        let anchor = NavigationAnchor(destinationName: name, kind: .destination, transform: frame.camera.transform)
         sceneView.session.add(anchor: anchor)
-        droppedAnchors.append(anchor)
-        sessionInfoText = "Dropped \"\(name)\""
+        destinations.append(anchor)
+        allMappingAnchors.append(anchor)
+        sessionInfoText = "Dropped destination \"\(name)\""
     }
 
-    func removeAnchor(_ anchor: NavigationAnchor) {
+    func removeDestination(_ anchor: NavigationAnchor) {
         sceneView.session.remove(anchor: anchor)
-        droppedAnchors.removeAll { $0.identifier == anchor.identifier }
+        destinations.removeAll { $0.identifier == anchor.identifier }
+        allMappingAnchors.removeAll { $0.identifier == anchor.identifier }
     }
 
-    // MARK: - Mapping: Save World Map
+    // MARK: - Mapping: Waypoints
 
-    func saveWorldMap() {
+    func dropWaypointAtCamera() {
+        guard let frame = sceneView.session.currentFrame else { return }
+        dropWaypoint(at: frame.camera.transform)
+    }
+
+    private func dropWaypoint(at transform: simd_float4x4) {
+        waypointCount += 1
+        let name = "WP-\(waypointCount)"
+        let anchor = NavigationAnchor(destinationName: name, kind: .waypoint, transform: transform)
+        sceneView.session.add(anchor: anchor)
+        allMappingAnchors.append(anchor)
+
+        let col = transform.columns.3
+        lastAutoWaypointPosition = SIMD3<Float>(col.x, col.y, col.z)
+    }
+
+    // MARK: - Mapping: Save
+
+    func saveWorldMap(name: String) {
         isSavingMap = true
         mapSaveResult = nil
-        sessionInfoText = "Saving world map..."
+        sessionInfoText = "Saving map..."
 
         sceneView.session.getCurrentWorldMap { [weak self] worldMap, error in
             DispatchQueue.main.async {
@@ -197,15 +238,11 @@ class ARSessionManager: NSObject, ObservableObject {
                 }
 
                 do {
-                    let data = try NSKeyedArchiver.archivedData(
-                        withRootObject: worldMap,
-                        requiringSecureCoding: true
-                    )
-                    try data.write(to: Self.worldMapURL, options: [.atomic])
-
-                    let anchorCount = worldMap.anchors.compactMap { $0 as? NavigationAnchor }.count
-                    self.mapSaveResult = "Saved (\(anchorCount) destination\(anchorCount == 1 ? "" : "s"))"
-                    self.sessionInfoText = "World map saved successfully"
+                    try MapStore.save(worldMap, name: name)
+                    let summary = MapStore.anchorSummary(for: worldMap)
+                    self.mapSaveResult = "Saved \"\(name)\" (\(summary.destinations) dest, \(summary.waypoints) waypoints)"
+                    self.sessionInfoText = "Map saved successfully"
+                    self.refreshSavedMaps()
                 } catch {
                     self.mapSaveResult = "Save failed: \(error.localizedDescription)"
                     self.sessionInfoText = "Save failed"
@@ -218,24 +255,29 @@ class ARSessionManager: NSObject, ObservableObject {
         worldMappingStatus == .mapped || worldMappingStatus == .extending
     }
 
-    var savedMapExists: Bool {
-        FileManager.default.fileExists(atPath: Self.worldMapURL.path)
-    }
-
     // MARK: - Navigation: Destination Selection
 
     func selectDestination(_ destination: NavigationAnchor) {
         selectedDestination = destination
+        recomputePath()
         sessionInfoText = "Navigating to \"\(destination.destinationName)\""
     }
 
     func clearNavigation() {
         selectedDestination = nil
         distanceToDestination = nil
+        currentPath = []
         clearPath()
         if isRelocalized {
             sessionInfoText = "Select a destination"
         }
+    }
+
+    private func recomputePath() {
+        guard let dest = selectedDestination,
+              let pov = sceneView.pointOfView else { return }
+        let cameraPos = pov.simdWorldPosition
+        currentPath = PathFinder.findPath(from: cameraPos, to: dest, through: allLoadedAnchors)
     }
 
     // MARK: - Path Rendering
@@ -244,22 +286,36 @@ class ARSessionManager: NSObject, ObservableObject {
         pathContainerNode.childNodes.forEach { $0.removeFromParentNode() }
     }
 
-    private func rebuildPath(from start: SIMD3<Float>, to end: SIMD3<Float>) {
+    private func renderPath(_ positions: [SIMD3<Float>]) {
         clearPath()
+        guard positions.count >= 2 else { return }
 
-        let direction = end - start
-        let distance = simd_length(direction)
-        guard distance > 0.1 else { return }
+        // Walk along each segment and place dots at regular intervals
+        var accumulated: Float = 0
+        var dotPositions: [SIMD3<Float>] = []
 
-        let step = min(pathSpacing, distance)
-        let count = max(Int(distance / step), 1)
-        let normalized = simd_normalize(direction)
+        for i in 0..<(positions.count - 1) {
+            let segStart = positions[i]
+            let segEnd = positions[i + 1]
+            let segDir = segEnd - segStart
+            let segLen = simd_length(segDir)
+            guard segLen > 0.01 else { continue }
+            let segNorm = simd_normalize(segDir)
 
-        for i in 1...count {
-            let t = Float(i) / Float(count)
-            let pos = start + normalized * (Float(i) * step)
+            var offset = pathDotSpacing - accumulated
+            while offset <= segLen {
+                let pos = segStart + segNorm * offset
+                dotPositions.append(pos)
+                offset += pathDotSpacing
+            }
+            accumulated = segLen - (offset - pathDotSpacing)
+        }
 
-            let isLast = i == count
+        let totalDots = dotPositions.count
+        for (i, pos) in dotPositions.enumerated() {
+            let t = totalDots > 1 ? Float(i) / Float(totalDots - 1) : 1.0
+            let isLast = i == totalDots - 1
+
             let node: SCNNode
             if isLast {
                 node = SCNNode(geometry: pathArrowGeometry.copy() as? SCNGeometry)
@@ -267,12 +323,12 @@ class ARSessionManager: NSObject, ObservableObject {
                 node = SCNNode(geometry: pathDotGeometry.copy() as? SCNGeometry)
             }
 
-            let green = CGFloat(1.0 - t)
-            let blue = CGFloat(t)
             node.geometry?.firstMaterial?.diffuse.contents = UIColor(
-                red: 0, green: 0.5 + green * 0.3, blue: 0.5 + blue * 0.5, alpha: 0.85
+                red: 0,
+                green: CGFloat(0.8 - t * 0.3),
+                blue: CGFloat(0.5 + t * 0.5),
+                alpha: 0.85
             )
-
             node.simdWorldPosition = pos
             pathContainerNode.addChildNode(node)
         }
@@ -315,15 +371,31 @@ extension ARSessionManager: ARSCNViewDelegate {
     func renderer(_ renderer: SCNSceneRenderer, nodeFor anchor: ARAnchor) -> SCNNode? {
         guard let navAnchor = anchor as? NavigationAnchor else { return nil }
 
+        if navAnchor.isWaypoint {
+            return waypointNode()
+        } else {
+            return destinationNode(for: navAnchor)
+        }
+    }
+
+    private func waypointNode() -> SCNNode {
+        let sphere = SCNSphere(radius: 0.025)
+        sphere.segmentCount = 8
+        sphere.firstMaterial?.diffuse.contents = UIColor.systemYellow.withAlphaComponent(0.5)
+        sphere.firstMaterial?.lightingModel = .constant
+        return SCNNode(geometry: sphere)
+    }
+
+    private func destinationNode(for anchor: NavigationAnchor) -> SCNNode {
         let isNavMode = appMode == .navigation
-        let markerColor: UIColor = isNavMode ? .systemGreen : .systemBlue
+        let color: UIColor = isNavMode ? .systemGreen : .systemBlue
 
         let sphere = SCNSphere(radius: 0.05)
-        sphere.firstMaterial?.diffuse.contents = markerColor
+        sphere.firstMaterial?.diffuse.contents = color
         sphere.firstMaterial?.lightingModel = .physicallyBased
         let sphereNode = SCNNode(geometry: sphere)
 
-        let text = SCNText(string: navAnchor.destinationName, extrusionDepth: 0.5)
+        let text = SCNText(string: anchor.destinationName, extrusionDepth: 0.5)
         text.font = UIFont.systemFont(ofSize: 4, weight: .bold)
         text.firstMaterial?.diffuse.contents = UIColor.white
         text.flatness = 0.1
@@ -356,7 +428,7 @@ extension ARSessionManager: ARSCNViewDelegate {
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
         guard appMode == .navigation,
               isRelocalized,
-              let destination = selectedDestination,
+              selectedDestination != nil,
               let pov = sceneView.pointOfView else {
             if !pathContainerNode.childNodes.isEmpty {
                 clearPath()
@@ -367,18 +439,28 @@ extension ARSessionManager: ARSCNViewDelegate {
             return
         }
 
-        guard time - lastPathUpdateTime > 0.1 else { return }
+        guard time - lastPathUpdateTime > 0.15 else { return }
         lastPathUpdateTime = time
 
         let cameraPos = pov.simdWorldPosition
-        let col3 = destination.transform.columns.3
-        let destPos = SIMD3<Float>(col3.x, col3.y, col3.z)
-        let dist = simd_length(destPos - cameraPos)
 
-        rebuildPath(from: cameraPos, to: destPos)
+        // Recompute path from current position
+        if let dest = selectedDestination {
+            currentPath = PathFinder.findPath(from: cameraPos, to: dest, through: allLoadedAnchors)
+        }
+
+        // Compute walking distance along path segments
+        var totalDist: Float = 0
+        if currentPath.count >= 2 {
+            for i in 0..<(currentPath.count - 1) {
+                totalDist += simd_length(currentPath[i + 1] - currentPath[i])
+            }
+        }
+
+        renderPath(currentPath)
 
         DispatchQueue.main.async { [weak self] in
-            self?.distanceToDestination = dist
+            self?.distanceToDestination = totalDist
         }
     }
 }
@@ -390,6 +472,24 @@ extension ARSessionManager: ARSessionDelegate {
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         let mapping = frame.worldMappingStatus
         let tracking = frame.camera.trackingState
+
+        // Auto-waypoint: drop a waypoint every ~1.5m while mapping
+        if appMode == .mapping && isAutoWaypointEnabled {
+            let col = frame.camera.transform.columns.3
+            let cameraPos = SIMD3<Float>(col.x, col.y, col.z)
+
+            if let lastPos = lastAutoWaypointPosition {
+                if simd_length(cameraPos - lastPos) >= autoWaypointInterval {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.dropWaypoint(at: frame.camera.transform)
+                    }
+                }
+            } else {
+                DispatchQueue.main.async { [weak self] in
+                    self?.lastAutoWaypointPosition = cameraPos
+                }
+            }
+        }
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -450,17 +550,17 @@ extension ARSessionManager: ARSessionDelegate {
         case .normal:
             switch appMode {
             case .mapping:
-                sessionInfoText = "Tracking: \(worldMappingStatusText)"
+                let wpInfo = isAutoWaypointEnabled ? " | \(waypointCount) waypoints" : ""
+                sessionInfoText = "Tracking: \(worldMappingStatusText)\(wpInfo)"
             case .navigation:
                 if let dest = selectedDestination {
                     if let dist = distanceToDestination {
-                        sessionInfoText = String(format: "Navigating to \"%@\" — %.1f m away",
-                                                 dest.destinationName, dist)
+                        sessionInfoText = String(format: "→ \"%@\" — %.1f m", dest.destinationName, dist)
                     } else {
                         sessionInfoText = "Navigating to \"\(dest.destinationName)\""
                     }
                 } else {
-                    sessionInfoText = "Localized! Select a destination."
+                    sessionInfoText = "Localized — select a destination"
                 }
             }
         }

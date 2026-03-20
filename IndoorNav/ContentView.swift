@@ -4,6 +4,8 @@ import ARKit
 struct ContentView: View {
     @StateObject private var sessionManager = ARSessionManager()
     @State private var anchorName = ""
+    @State private var mapName = ""
+    @State private var showMapPicker = false
 
     var body: some View {
         ZStack {
@@ -27,11 +29,17 @@ struct ContentView: View {
             sessionManager.startMappingSession()
         }
         .onChange(of: sessionManager.appMode) { newMode in
-            switch newMode {
-            case .mapping:
+            if newMode == .mapping {
                 sessionManager.startMappingSession()
-            case .navigation:
-                sessionManager.startNavigationSession()
+                showMapPicker = false
+            } else {
+                sessionManager.refreshSavedMaps()
+                if sessionManager.savedMapNames.isEmpty {
+                    sessionManager.navigationError = "No saved maps. Map the space first."
+                    sessionManager.sessionInfoText = "No maps available"
+                } else {
+                    showMapPicker = true
+                }
             }
         }
     }
@@ -57,8 +65,44 @@ struct ContentView: View {
     private var mappingControls: some View {
         VStack(spacing: 10) {
 
-            if !sessionManager.droppedAnchors.isEmpty {
-                anchorList
+            // Auto-waypoint toggle + manual waypoint button
+            HStack {
+                Toggle(isOn: $sessionManager.isAutoWaypointEnabled) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "point.topleft.down.to.point.bottomright.curvepath.fill")
+                            .foregroundStyle(.yellow)
+                        Text("Auto-Waypoints")
+                            .font(.caption)
+                    }
+                }
+                .toggleStyle(.switch)
+                .tint(.yellow)
+
+                Spacer()
+
+                Button {
+                    sessionManager.dropWaypointAtCamera()
+                } label: {
+                    Image(systemName: "plus.circle")
+                    Text("WP")
+                }
+                .buttonStyle(.bordered)
+                .tint(.yellow)
+                .font(.caption)
+            }
+
+            if sessionManager.waypointCount > 0 {
+                Text("\(sessionManager.waypointCount) waypoint\(sessionManager.waypointCount == 1 ? "" : "s") placed")
+                    .font(.caption2)
+                    .foregroundStyle(.yellow)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Divider()
+
+            // Destinations
+            if !sessionManager.destinations.isEmpty {
+                destinationList
             }
 
             HStack(spacing: 10) {
@@ -69,7 +113,7 @@ struct ContentView: View {
                 Button {
                     let name = anchorName.trimmingCharacters(in: .whitespaces)
                     guard !name.isEmpty else { return }
-                    sessionManager.dropAnchor(named: name)
+                    sessionManager.dropDestination(named: name)
                     anchorName = ""
                 } label: {
                     Image(systemName: "mappin.and.ellipse")
@@ -80,24 +124,35 @@ struct ContentView: View {
                 .disabled(anchorName.trimmingCharacters(in: .whitespaces).isEmpty)
             }
 
+            Divider()
+
+            // Save
             HStack(spacing: 10) {
+                TextField("Map name", text: $mapName)
+                    .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled()
+
                 Button {
-                    sessionManager.saveWorldMap()
+                    let name = mapName.trimmingCharacters(in: .whitespaces)
+                    guard !name.isEmpty else { return }
+                    sessionManager.saveWorldMap(name: name)
                 } label: {
                     HStack {
                         if sessionManager.isSavingMap {
-                            ProgressView()
-                                .tint(.white)
+                            ProgressView().tint(.white)
                         } else {
                             Image(systemName: "square.and.arrow.down")
                         }
-                        Text("Save Map")
+                        Text("Save")
                     }
-                    .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.green)
-                .disabled(!sessionManager.canSaveMap || sessionManager.isSavingMap)
+                .disabled(
+                    !sessionManager.canSaveMap
+                    || sessionManager.isSavingMap
+                    || mapName.trimmingCharacters(in: .whitespaces).isEmpty
+                )
             }
 
             if let result = sessionManager.mapSaveResult {
@@ -107,7 +162,7 @@ struct ContentView: View {
             }
 
             if !sessionManager.canSaveMap {
-                Text("Move around to improve mapping before saving")
+                Text("Walk around to build map quality before saving")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -116,24 +171,23 @@ struct ContentView: View {
         .background(.ultraThinMaterial)
     }
 
-    // MARK: - Anchor List (Mapping)
+    // MARK: - Destination List (Mapping)
 
-    private var anchorList: some View {
+    private var destinationList: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Destinations (\(sessionManager.droppedAnchors.count))")
+            Text("Destinations (\(sessionManager.destinations.count))")
                 .font(.caption.bold())
-                .foregroundStyle(.primary)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    ForEach(sessionManager.droppedAnchors, id: \.identifier) { anchor in
+                    ForEach(sessionManager.destinations, id: \.identifier) { anchor in
                         HStack(spacing: 4) {
                             Image(systemName: "mappin.circle.fill")
                                 .foregroundStyle(.blue)
                             Text(anchor.destinationName)
                                 .font(.caption)
                             Button {
-                                sessionManager.removeAnchor(anchor)
+                                sessionManager.removeDestination(anchor)
                             } label: {
                                 Image(systemName: "xmark.circle.fill")
                                     .foregroundStyle(.secondary)
@@ -154,7 +208,9 @@ struct ContentView: View {
 
     private var navigationControls: some View {
         VStack(spacing: 10) {
-            if sessionManager.isLoadingMap {
+            if showMapPicker {
+                mapPickerView
+            } else if sessionManager.isLoadingMap {
                 HStack {
                     ProgressView()
                     Text("Loading map...")
@@ -180,6 +236,59 @@ struct ContentView: View {
         .background(.ultraThinMaterial)
     }
 
+    // MARK: - Map Picker
+
+    private var mapPickerView: some View {
+        VStack(spacing: 8) {
+            Text("Select a saved map:")
+                .font(.subheadline.bold())
+
+            if sessionManager.savedMapNames.isEmpty {
+                Text("No maps saved yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 6) {
+                        ForEach(sessionManager.savedMapNames, id: \.self) { name in
+                            HStack {
+                                Button {
+                                    showMapPicker = false
+                                    sessionManager.startNavigationSession(mapName: name)
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "map.fill")
+                                        Text(name)
+                                            .font(.subheadline)
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(Color.blue.opacity(0.1))
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
+                                .buttonStyle(.plain)
+
+                                Button(role: .destructive) {
+                                    sessionManager.deleteMap(named: name)
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(.red)
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 180)
+            }
+        }
+    }
+
     // MARK: - Relocalization View
 
     private var relocalizationView: some View {
@@ -189,16 +298,22 @@ struct ContentView: View {
 
             Text("Look around to localize...")
                 .font(.subheadline.bold())
-                .foregroundStyle(.primary)
 
             Text("Point your device at the area you previously mapped. Move slowly and revisit recognizable features.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
-            Text("\(sessionManager.loadedDestinations.count) destination\(sessionManager.loadedDestinations.count == 1 ? "" : "s") in saved map")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            if let mapName = sessionManager.selectedMapName {
+                Text("Map: \"\(mapName)\" — \(sessionManager.loadedDestinations.count) destination\(sessionManager.loadedDestinations.count == 1 ? "" : "s")")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Button("Choose different map") {
+                showMapPicker = true
+            }
+            .font(.caption)
         }
     }
 
@@ -212,6 +327,11 @@ struct ContentView: View {
                 Text("Localized")
                     .font(.caption.bold())
                     .foregroundStyle(.green)
+                if let name = sessionManager.selectedMapName {
+                    Text("(\(name))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 if sessionManager.selectedDestination != nil {
                     Button("Clear") {
@@ -222,11 +342,11 @@ struct ContentView: View {
             }
 
             if sessionManager.loadedDestinations.isEmpty {
-                Text("No destinations found in the saved map.")
+                Text("No destinations in this map.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                Text("Select a destination:")
+                Text("Where do you want to go?")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -245,9 +365,8 @@ struct ContentView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "location.fill")
                         .foregroundStyle(.cyan)
-                    Text(String(format: "\"%@\" is %.1f m away", dest.destinationName, dist))
+                    Text(String(format: "\"%@\" — %.1f m", dest.destinationName, dist))
                         .font(.caption.bold())
-                        .foregroundStyle(.primary)
                 }
                 .padding(.top, 2)
 
@@ -261,6 +380,13 @@ struct ContentView: View {
                     }
                 }
             }
+
+            Button("Choose different map") {
+                showMapPicker = true
+                sessionManager.clearNavigation()
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
         }
     }
 
@@ -317,7 +443,7 @@ struct ContentView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "viewfinder")
                         .font(.caption2)
-                    Text("LiDAR Scene Reconstruction Active")
+                    Text("LiDAR Active")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }

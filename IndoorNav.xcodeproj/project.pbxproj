@@ -13,6 +13,8 @@
 		B1B2C3D400000000000B0004 /* ARSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000000000A0004 /* ARSessionManager.swift */; };
 		B1B2C3D400000000000B0005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000000000A0006 /* Assets.xcassets */; };
 		B1B2C3D400000000000B0006 /* NavigationAnchor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000000000A0008 /* NavigationAnchor.swift */; };
+		B1B2C3D400000000000B0007 /* PathFinder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000000000A0009 /* PathFinder.swift */; };
+		B1B2C3D400000000000B0008 /* MapStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000000000A000A /* MapStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -24,6 +26,8 @@
 		A1B2C3D400000000000A0006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1B2C3D400000000000A0007 /* IndoorNav.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = IndoorNav.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1B2C3D400000000000A0008 /* NavigationAnchor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationAnchor.swift; sourceTree = "<group>"; };
+		A1B2C3D400000000000A0009 /* PathFinder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathFinder.swift; sourceTree = "<group>"; };
+		A1B2C3D400000000000A000A /* MapStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -53,6 +57,8 @@
 				A1B2C3D400000000000A0003 /* ARViewContainer.swift */,
 				A1B2C3D400000000000A0004 /* ARSessionManager.swift */,
 				A1B2C3D400000000000A0008 /* NavigationAnchor.swift */,
+				A1B2C3D400000000000A0009 /* PathFinder.swift */,
+				A1B2C3D400000000000A000A /* MapStore.swift */,
 				A1B2C3D400000000000A0006 /* Assets.xcassets */,
 				A1B2C3D400000000000A0005 /* Info.plist */,
 			);
@@ -141,6 +147,8 @@
 				B1B2C3D400000000000B0003 /* ARViewContainer.swift in Sources */,
 				B1B2C3D400000000000B0004 /* ARSessionManager.swift in Sources */,
 				B1B2C3D400000000000B0006 /* NavigationAnchor.swift in Sources */,
+				B1B2C3D400000000000B0007 /* PathFinder.swift in Sources */,
+				B1B2C3D400000000000B0008 /* MapStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -1,6 +1,6 @@
-# IndoorNav — AR Indoor Navigation (MVP)
+# IndoorNav — AR Indoor Navigation
 
-A hardware-free indoor AR navigation app for iOS. An admin maps a physical space by walking through it and dropping named destination markers; a user then loads that map, relocalizes their device, and follows an AR path overlay to their chosen destination.
+A hardware-free indoor AR navigation app for iOS. An admin maps a physical space by walking through it — the app automatically lays down waypoints along corridors and the admin drops named destination markers at key locations. Users then load that map, relocalize their device, and follow a waypoint-routed AR path to their chosen destination.
 
 Built with **SwiftUI**, **ARKit**, and **SceneKit**.
 
@@ -19,10 +19,13 @@ Built with **SwiftUI**, **ARKit**, and **SceneKit**.
   - [Data Flow](#data-flow)
 - [Technical Details](#technical-details)
   - [AR Configuration](#ar-configuration)
-  - [World Map Persistence](#world-map-persistence)
+  - [Waypoints & Auto-Drop](#waypoints--auto-drop)
+  - [Pathfinding (Dijkstra)](#pathfinding-dijkstra)
+  - [Map Storage](#map-storage)
   - [Custom Anchor Serialization](#custom-anchor-serialization)
   - [Relocalization](#relocalization)
   - [Path Rendering](#path-rendering)
+- [Example: Mapping Your Office](#example-mapping-your-office)
 - [Troubleshooting](#troubleshooting)
 - [Limitations](#limitations)
 - [License](#license)
@@ -52,13 +55,7 @@ cd /path/to/lidar-project
 open IndoorNav.xcodeproj
 ```
 
-### 2. Accept the Xcode license (if not already done)
-
-```bash
-sudo xcodebuild -license accept
-```
-
-### 3. Configure signing
+### 2. Configure signing
 
 1. Open `IndoorNav.xcodeproj` in Xcode.
 2. Select the **IndoorNav** target in the project navigator.
@@ -66,12 +63,12 @@ sudo xcodebuild -license accept
 4. Set **Team** to your Apple Developer account (free or paid).
 5. Optionally change **Bundle Identifier** from `com.example.IndoorNav` to something unique.
 
-### 4. Build and run
+### 3. Build and run
 
 1. Connect a physical iOS device via USB or Wi-Fi.
-2. Select your device as the run destination in Xcode's toolbar.
-3. Press **Cmd+R** (or the Play button) to build and run.
-4. On first launch, grant camera access when prompted.
+2. Select your device as the run destination.
+3. Press **Cmd+R** to build and run.
+4. Grant camera access when prompted.
 
 ---
 
@@ -81,48 +78,78 @@ The app has two modes, controlled by a segmented toggle at the top of the screen
 
 ### 1. Map the Space (Admin Mode)
 
-This mode is used by an administrator to create a map of the indoor environment.
+This mode is for an administrator to create a navigable map of an indoor space.
 
-**Steps:**
+#### Step A: Enable auto-waypoints and walk
 
-1. **Walk the space.** Hold the device and walk slowly through the area you want to map. ARKit tracks visual features (edges, textures, patterns) in the environment and builds an internal world map. Watch the **World Map** status indicator at the bottom of the screen:
-   - Red (Not Available) — ARKit is still initializing.
-   - Orange (Limited) — Some features detected; keep moving.
-   - Yellow (Extending) — Good coverage; the map is growing. You can save now.
-   - Green (Mapped) — Excellent coverage. Ideal time to save.
+1. Toggle **Auto-Waypoints** ON (yellow switch at the top of the controls).
+2. Walk slowly through every corridor, hallway, and room you want to be navigable.
+3. The app automatically drops a waypoint every ~1.5 meters as you walk. These appear as small yellow spheres in AR space. They define the **walkable paths** that navigation will follow.
+4. You can also tap **+ WP** to manually drop a waypoint at your current position (useful for corners or junctions).
 
-2. **Drop destination anchors.** When you reach a point of interest (a meeting room door, an elevator, a restroom, etc.):
-   - Type a name in the text field (e.g., "Meeting Room A").
-   - Tap **Drop**. A blue 3D sphere with a floating label appears in AR space at that position.
-   - Repeat for every destination. You can remove anchors by tapping the X on their chip.
+#### Step B: Drop destination markers
 
-3. **Save the map.** Once the World Map status reaches **Extending** or **Mapped**, tap **Save Map**. This captures ARKit's `ARWorldMap` (which includes all visual feature points, detected planes, and your custom anchors) and writes it to the device's Documents directory as `IndoorNavWorldMap.arexperience`.
+At each point of interest (meeting room door, restroom, elevator, kitchen, etc.):
+1. Type a name in the "Destination name" field (e.g., "Meeting Room A").
+2. Tap **Drop**. A blue 3D sphere with a floating label appears at that position.
+3. Repeat for every destination in the space.
+
+#### Step C: Save the map
+
+1. Type a name in the "Map name" field (e.g., "Office Floor 3").
+2. Wait until the World Map status is at least **Extending** (yellow) or **Mapped** (green).
+3. Tap **Save**. The entire world map — including all waypoints, destinations, and visual features — is archived to disk.
+
+You can save multiple maps (different floors, buildings, etc.). Each is stored as a separate file.
 
 **Tips for good mapping:**
 - Walk slowly and steadily. Avoid sudden movements.
-- Cover the space from multiple angles — don't just walk a straight line.
-- Ensure the environment has visual texture (plain white walls are hard for ARKit to track).
-- Good lighting helps significantly.
+- Cover corridors from one end to the other — don't skip sections.
+- At junctions/intersections, walk each branch so waypoints connect all paths.
+- Ensure adequate lighting and visual texture (posters, furniture, signs help).
+- More waypoints = better route quality. Auto-drop at 1.5m spacing is usually sufficient.
 
 ### 2. Navigate (User Mode)
 
-This mode is used by anyone who needs to find their way through the mapped space.
+This mode is for anyone who needs to find their way through a mapped space.
 
-**Steps:**
+#### Step A: Select a map
 
-1. **Load and relocalize.** When you switch to Navigate mode, the app automatically loads the saved world map and starts an AR session with it. A spinner and "Look around to localize..." message appear. Point the device at the same physical area where the map was created and move slowly. ARKit matches live camera features against the saved map's feature points.
+Switch to "Navigate" mode. A list of all saved maps appears. Tap the map you want (e.g., "Office Floor 3").
 
-2. **Wait for localization.** When tracking transitions to **Normal**, the UI switches to a green "Localized" badge and presents the destination list. This means ARKit has successfully matched the current environment to the saved map. All saved destination anchors reappear in their original 3D positions as green pulsing spheres.
+#### Step B: Relocalize
 
-3. **Select a destination.** Tap one of the destination buttons (e.g., "Meeting Room A"). A dotted AR path immediately appears:
-   - Cyan/green dots lead from your current camera position to the destination.
-   - The dots update in real-time (~10 FPS) as you move.
-   - A color gradient shifts from green (near you) to blue (near the destination).
-   - A cone marker indicates the final point.
+The app loads the saved world map and starts matching the live camera to it. A spinner shows "Look around to localize..." — point the device at the same physical area where the map was created and move slowly. When ARKit matches enough visual features, a green "Localized" badge appears.
 
-4. **Follow the path.** Walk toward the destination. The distance readout updates live. When you're within 0.5 meters, a "You have arrived!" badge appears.
+#### Step C: Select a destination
 
-5. **Change destination.** Tap a different destination button at any time, or tap **Clear** to dismiss the path.
+Tap one of the destination buttons (e.g., "Meeting Room A"). A cyan dotted path appears in AR space, **following the waypoints** through corridors — not cutting through walls.
+
+#### Step D: Follow the path
+
+Walk along the dotted path. The route and distance update in real-time. When you're within 0.5 meters, "You have arrived!" appears.
+
+You can tap a different destination at any time to reroute, or tap **Clear** to dismiss the path.
+
+---
+
+## Example: Mapping Your Office
+
+Here's a concrete walkthrough for mapping a typical office floor:
+
+1. **Start at the entrance.** Open the app, ensure you're in "Map the Space" mode, and toggle Auto-Waypoints ON.
+
+2. **Walk the main corridor.** Walk slowly down the main hallway. The app drops yellow waypoints every 1.5m automatically. You'll see the waypoint counter incrementing.
+
+3. **At each door, drop a destination.** When you reach the entrance to "Conference Room B", stop, type "Conference Room B", and tap Drop. A blue sphere appears at that spot.
+
+4. **Walk every branch.** If there's a side corridor to the kitchen, walk down it (waypoints auto-drop along the way), drop a "Kitchen" destination, then walk back to the main corridor and continue.
+
+5. **Cover the whole floor.** Walk every corridor you want to be navigable. The more thoroughly you walk, the better the navigation routes will be.
+
+6. **Save.** Once you've covered everything and the world map status is yellow or green, type "Office 3rd Floor" as the map name and tap Save.
+
+7. **Test it.** Switch to Navigate mode, select "Office 3rd Floor", localize, and tap a destination. The path should follow the corridors you walked.
 
 ---
 
@@ -132,68 +159,69 @@ This mode is used by anyone who needs to find their way through the mapped space
 
 ```
 IndoorNav.xcodeproj/
-  project.pbxproj              Xcode project configuration
+  project.pbxproj
 
 IndoorNav/
   IndoorNavApp.swift            @main App entry point (SwiftUI lifecycle)
-  ContentView.swift             Full UI: mode picker, mapping controls,
+  ContentView.swift             Full UI: mode picker, mapping controls, map picker,
                                 navigation controls, status bar
   ARViewContainer.swift         UIViewRepresentable wrapping ARSCNView
   ARSessionManager.swift        AR session lifecycle, world map save/load,
-                                relocalization detection, path rendering
-  NavigationAnchor.swift        Custom ARAnchor subclass with NSSecureCoding
+                                waypoint management, relocalization, path rendering
+  NavigationAnchor.swift        Custom ARAnchor subclass (destination + waypoint kinds)
+  PathFinder.swift              Graph construction + Dijkstra shortest-path algorithm
+  MapStore.swift                Multiple named map storage (save/load/list/delete)
   Info.plist                    Camera permission, ARKit capability, orientation lock
   Assets.xcassets/              App icon and accent color
 ```
 
 ### Key Classes
 
-**`ARSessionManager`** (`NSObject`, `ObservableObject`)
+**`ARSessionManager`** — The central manager. Owns the `ARSCNView` and `ARSession`. Handles both mapping (with auto-waypoint dropping) and navigation (with pathfinding-based route rendering). Publishes all state for reactive SwiftUI binding.
 
-The central manager that owns the `ARSCNView` and its `ARSession`. It:
-- Configures and runs world tracking sessions for both modes.
-- Implements `ARSessionDelegate` to track mapping quality and camera tracking state.
-- Implements `ARSCNViewDelegate` to render custom 3D nodes for anchors and update the path each frame.
-- Publishes all state via `@Published` properties for reactive SwiftUI binding.
+**`NavigationAnchor`** — Custom `ARAnchor` subclass with a `destinationName` and a `kind` (`.destination` or `.waypoint`). Implements `NSSecureCoding` for world map serialization.
 
-**`NavigationAnchor`** (subclass of `ARAnchor`)
+**`PathFinder`** — Static utility that builds a walkable graph from anchors (waypoints + destinations) and runs Dijkstra's algorithm to find the shortest path. Nodes within 5 meters of each other are auto-connected, which works because waypoints are spaced ~1.5m apart.
 
-A custom anchor that carries a `destinationName` string. Implements `NSSecureCoding` so that it survives serialization inside an `ARWorldMap` when saved to disk and deserialized when loaded back.
+**`MapStore`** — Manages multiple named `.arexperience` files in the app's Documents directory. Supports save, load, list (sorted by modification date), delete, and anchor summary.
 
-**`ContentView`** (SwiftUI `View`)
-
-The root view. Uses a `ZStack` to layer the AR camera feed behind translucent material UI panels. Switches between mapping and navigation control sets based on `appMode`.
-
-**`ARViewContainer`** (`UIViewRepresentable`)
-
-A thin bridge that returns the session manager's `ARSCNView` to SwiftUI.
+**`ContentView`** — The root SwiftUI view. Switches between mapping controls (waypoint toggle, destination input, map save) and navigation controls (map picker, relocalization, destination picker, distance readout).
 
 ### Data Flow
 
 ```
-User interaction (SwiftUI)
-        |
-        v
-  ContentView (@StateObject sessionManager)
-        |
-        v
-  ARSessionManager (@Published state)
-        |
-        +---> ARSession (ARKit)
-        |         |
-        |         v
-        |     ARSessionDelegate callbacks
-        |         |
-        |         v
-        |     @Published updates --> SwiftUI re-renders
-        |
-        +---> ARSCNView (SceneKit)
-                  |
-                  v
-              ARSCNViewDelegate
-                  |
-                  +---> renderer(_:nodeFor:)      — anchor visualization
-                  +---> renderer(_:updateAtTime:) — path updates
+User taps (SwiftUI)
+      |
+      v
+ContentView (@StateObject sessionManager)
+      |
+      v
+ARSessionManager (@Published state)
+      |
+      +--> ARSession (ARKit)
+      |       |
+      |       v
+      |    ARSessionDelegate
+      |       |-- didUpdate frame --> update tracking/mapping status
+      |       |                   --> auto-drop waypoints (if enabled)
+      |       |
+      |       v
+      |    @Published updates --> SwiftUI re-renders
+      |
+      +--> ARSCNView (SceneKit)
+      |       |
+      |       v
+      |    ARSCNViewDelegate
+      |       |-- nodeFor anchor    --> render destination/waypoint 3D markers
+      |       |-- updateAtTime      --> PathFinder.findPath() --> renderPath()
+      |
+      +--> MapStore
+      |       |-- save/load/list/delete world maps
+      |
+      +--> PathFinder
+              |-- builds graph from anchors
+              |-- Dijkstra shortest path
+              |-- returns ordered [SIMD3<Float>] positions
 ```
 
 ---
@@ -203,57 +231,83 @@ User interaction (SwiftUI)
 ### AR Configuration
 
 Both modes use `ARWorldTrackingConfiguration` with:
-- **Plane detection:** horizontal and vertical surfaces.
-- **Environment texturing:** automatic (improves visual quality of AR content).
-- **Scene reconstruction:** mesh-based, enabled automatically on LiDAR devices via `supportsSceneReconstruction(.mesh)`. This provides denser spatial understanding but is not required.
-- **Debug options:** feature points are shown as yellow dots to give the user feedback on tracking quality.
+- **Plane detection:** horizontal and vertical.
+- **Environment texturing:** automatic.
+- **Scene reconstruction:** mesh-based on LiDAR devices (automatic detection).
+- **Debug options:** feature points shown as yellow dots.
 
-### World Map Persistence
+### Waypoints & Auto-Drop
 
-The world map is saved to:
+Waypoints are lightweight `NavigationAnchor` instances with `kind = .waypoint`. They represent walkable positions along corridors.
+
+**Auto-drop mode** monitors the camera position in `session(_:didUpdate:)`. When the device has moved >= 1.5 meters from the last waypoint, a new waypoint is dropped automatically. This creates a dense trail of walkable nodes along every corridor the admin walks.
+
+**Manual drop** via the "+ WP" button allows placing waypoints at specific locations (corners, junctions, narrow passages).
+
+Waypoints render as small semi-transparent yellow spheres (2.5cm radius) in AR space — visible to the admin during mapping but unobtrusive.
+
+### Pathfinding (Dijkstra)
+
+`PathFinder` builds a graph from all anchors (waypoints + destinations):
+
+1. **Graph construction:** Every pair of anchors within 5 meters of each other gets a bidirectional edge with Euclidean distance as the weight. This radius works well because auto-dropped waypoints are 1.5m apart, so consecutive waypoints always connect.
+
+2. **Virtual start node:** The user's current camera position is added as a temporary node, connected to all anchors within a generous radius (at least 5m, or 1.5x the distance to the nearest anchor, whichever is larger).
+
+3. **Dijkstra's algorithm:** Finds the shortest weighted path from the virtual start to the destination anchor. O(n²) implementation, which is fast enough for hundreds of waypoints.
+
+4. **Fallback:** If no graph path exists (disconnected waypoints), falls back to a straight line.
+
+The result is an ordered array of 3D positions that the path renderer draws through.
+
+### Map Storage
+
+Maps are saved to:
 
 ```
-<App Documents>/IndoorNavWorldMap.arexperience
+<App Documents>/IndoorNavMaps/<map-name>.arexperience
 ```
 
-The save pipeline:
-1. `ARSession.getCurrentWorldMap()` — asynchronous callback returning an `ARWorldMap`.
-2. `NSKeyedArchiver.archivedData(withRootObject:requiringSecureCoding:)` — serializes the world map (including all anchors) into `Data`.
-3. `Data.write(to:options:.atomic)` — writes to disk atomically.
+Each file is a `NSKeyedArchiver`-serialized `ARWorldMap` containing:
+- ARKit's visual feature point cloud
+- Detected planes
+- All `NavigationAnchor` instances (destinations and waypoints)
+- Environment texture data
 
-The load pipeline (inverse):
-1. `Data(contentsOf:)` — reads the file.
-2. `NSKeyedUnarchiver.unarchivedObject(ofClass: ARWorldMap.self, from:)` — deserializes.
-3. The map is set as `config.initialWorldMap` before running the session.
+`MapStore` provides CRUD operations:
+- **Save:** Archives and writes atomically.
+- **Load:** Reads and unarchives with secure coding.
+- **List:** Returns map names sorted by most recently modified.
+- **Delete:** Removes the file.
+- **Summary:** Counts destinations and waypoints in a world map.
 
 ### Custom Anchor Serialization
 
-`NavigationAnchor` extends `ARAnchor` with a `destinationName` property. For this to survive the `NSKeyedArchiver`/`NSKeyedUnarchiver` round-trip inside the world map:
+`NavigationAnchor` extends `ARAnchor` with `destinationName` (String) and `kind` (AnchorKind enum). Both properties are encoded via `NSSecureCoding`:
 
-- `supportsSecureCoding` returns `true`.
-- `encode(with:)` calls `super.encode(with:)` and then encodes `destinationName` under a static key.
-- `init?(coder:)` decodes `destinationName` and calls `super.init(coder:)`.
-- `init(anchor:)` is implemented to satisfy ARKit's internal anchor-copying contract.
+- `encode(with:)` calls `super.encode(with:)` then encodes both custom properties as `NSString`.
+- `init?(coder:)` decodes both properties then calls `super.init(coder:)`.
+- `init(anchor:)` copies properties from another anchor (ARKit's internal copy contract).
 
 ### Relocalization
 
-When a world map is loaded via `initialWorldMap`, ARKit enters a relocalization phase:
-1. The camera tracking state starts as `.limited(.relocalizing)`.
-2. ARKit compares live camera features against the saved map's feature point cloud.
-3. When enough features match, tracking transitions to `.normal`.
-4. The app detects this transition in `session(_:didUpdate:)` and sets `isRelocalized = true`.
+When a world map is loaded with `initialWorldMap`:
+1. Tracking starts as `.limited(.relocalizing)`.
+2. ARKit matches live features against the saved map's feature cloud.
+3. On match, tracking transitions to `.normal`.
+4. The app detects this in `session(_:didUpdate:)` and sets `isRelocalized = true`.
 
-For best results, the user should be in the same physical area where the map was originally captured, with similar lighting conditions.
+Best results when the user is in the same area with similar lighting.
 
 ### Path Rendering
 
-The path is rendered as a series of SceneKit nodes managed by a dedicated `pathContainerNode` attached to the scene root:
+The path follows the Dijkstra-computed waypoint route:
 
-- **Update frequency:** ~10 FPS, throttled in `renderer(_:updateAtTime:)` to avoid unnecessary work.
-- **Geometry:** small `SCNSphere` nodes (radius 1.5cm) spaced 30cm apart along a straight line from camera to destination. The final node uses an `SCNCone` (arrow shape).
-- **Color:** gradient from green-cyan (near user) to blue-cyan (near destination) for directional cues.
-- **Lifecycle:** all path nodes are cleared and rebuilt each update cycle. The geometry instances are copied from shared templates to avoid allocation overhead.
-- **Distance:** computed as Euclidean distance between camera and anchor positions; published to the UI for the distance readout.
+1. **Segment walking:** The renderer walks along each path segment, placing dots at regular intervals (25cm apart).
+2. **Color gradient:** Green-cyan near the user, blue-cyan near the destination.
+3. **Arrow terminus:** The final dot uses a cone/arrow geometry.
+4. **Update rate:** ~6-7 FPS (every 150ms in the SceneKit render loop).
+5. **Distance:** Computed as the sum of all path segment lengths (walking distance, not straight-line).
 
 ---
 
@@ -261,28 +315,27 @@ The path is rendered as a series of SceneKit nodes managed by a dedicated `pathC
 
 | Problem | Solution |
 |---|---|
-| "AR not available on this device" | ARKit requires an A9 chip or later. Must be a physical device, not the Simulator. |
-| World Map status stays red/orange | Move more slowly. Ensure the environment has visual texture and adequate lighting. Plain white walls or dark rooms are problematic. |
-| Save Map button is disabled | The world map status must reach at least "Extending" (yellow). Keep walking and scanning. |
-| Relocalization fails / stays on spinner | You must be in the same physical area where the map was created. Lighting conditions should be similar. Point at distinctive features (posters, furniture edges, signs). |
-| "No saved map found" error | Switch to "Map the Space" mode first and complete a full map+save cycle before attempting navigation. |
-| Path appears to float or drift | This can happen if relocalization was marginal. Try moving to revisit more of the originally mapped area. The world map quality during the mapping phase directly affects navigation accuracy. |
+| "AR not available" | Must be a physical device with A9+ chip. Not supported in the Simulator. |
+| World Map stays red/orange | Move slowly. Ensure visual texture and good lighting. |
+| Save button disabled | World map status must reach Extending or Mapped. Keep walking. |
+| Relocalization stuck on spinner | Must be in the same physical area with similar lighting. Point at distinctive features. |
+| Path goes through walls | Not enough waypoints in that area. Re-map with auto-waypoints ON, walking through every corridor. |
+| Path not found (straight line) | Waypoints may be disconnected (gap > 5m). Walk the connecting corridor to add waypoints, then re-save. |
+| "No saved maps" error | Map the space first and save before switching to Navigate. |
 
 ---
 
 ## Limitations
 
-This is an MVP. Known limitations and areas for future work:
-
-- **Straight-line pathfinding only.** The path is a direct line from camera to destination. It does not account for walls, obstacles, or room layouts. A future version could integrate ARKit's mesh data for obstacle-aware pathfinding (e.g., A* on a navigation mesh).
-- **Single map file.** Only one world map is stored at a time. Saving a new map overwrites the previous one. A future version could support multiple named maps.
-- **Same-device mapping and navigation.** The world map is saved to the local Documents directory. Sharing maps between devices would require file export/import or a backend.
-- **Lighting sensitivity.** ARKit's visual feature matching is sensitive to lighting changes between the mapping and navigation sessions. Maps created in daylight may not relocalize well at night.
-- **No floor-level path clamping.** Path dots follow a straight 3D line which may pass through walls or float above/below the floor. Clamping to detected planes or mesh surfaces would improve realism.
-- **Portrait orientation only.** The app is locked to portrait for simplicity.
+- **No obstacle avoidance in pathfinding.** Routes follow waypoints, not mesh geometry. If you didn't walk a corridor, there won't be waypoints there, and the path may cut through walls as a fallback.
+- **Same-device only.** Maps are stored locally. Sharing between devices would require file export or a backend.
+- **Lighting sensitivity.** Maps created in daylight may not relocalize well at night.
+- **No floor-level clamping.** Path dots follow 3D waypoint positions, which may be at varying heights depending on how the admin held the device.
+- **Single-floor per map.** Each map covers one contiguous area. Multi-floor navigation would require selecting different maps per floor.
+- **Portrait orientation only.**
 
 ---
 
 ## License
 
-This project is provided as-is for educational and prototyping purposes. No license file is included — add your own as needed.
+This project is provided as-is for educational and prototyping purposes.
