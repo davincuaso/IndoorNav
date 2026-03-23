@@ -68,15 +68,24 @@ final class MeshObstacleExtractor {
         let faces = geometry.faces
         let vertexBuffer = vertices.buffer.contents()
         let faceBuffer = faces.buffer.contents()
+        let bytesPerIndex = faces.bytesPerIndex
+        let indicesPerFace = faces.indexCountPerPrimitive
 
         // Process each triangle face
         for faceIndex in 0..<faces.count {
-            let facePointer = faceBuffer.advanced(by: faces.offset + faces.indexCountPerPrimitive * faceIndex * MemoryLayout<UInt32>.stride)
-            let indices = facePointer.assumingMemoryBound(to: UInt32.self)
-
             var faceVertices: [SIMD3<Float>] = []
-            for i in 0..<3 {
-                let vertexIndex = Int(indices[i])
+
+            for i in 0..<indicesPerFace {
+                let indexOffset = (faceIndex * indicesPerFace + i) * bytesPerIndex
+                let indexPointer = faceBuffer.advanced(by: indexOffset)
+
+                let vertexIndex: Int
+                if bytesPerIndex == 4 {
+                    vertexIndex = Int(indexPointer.assumingMemoryBound(to: UInt32.self).pointee)
+                } else {
+                    vertexIndex = Int(indexPointer.assumingMemoryBound(to: UInt16.self).pointee)
+                }
+
                 let vertexPointer = vertexBuffer.advanced(by: vertices.offset + vertices.stride * vertexIndex)
                 let localVertex = vertexPointer.assumingMemoryBound(to: SIMD3<Float>.self).pointee
                 let worldVertex = anchor.transform * SIMD4<Float>(localVertex, 1)
@@ -220,9 +229,11 @@ final class MeshObstacleExtractor {
         // Expand hull slightly for safety margin
         let expandedHull = expandPolygon(hull, by: 0.15)
 
-        // Convert to GKPolygonObstacle (uses vector_float2)
-        let gkPoints = expandedHull.map { vector_float2($0.x, $0.y) }
-        return GKPolygonObstacle(points: gkPoints, count: gkPoints.count)
+        // Convert to GKPolygonObstacle using UnsafeMutablePointer
+        var gkPoints = expandedHull.map { vector_float2($0.x, $0.y) }
+        return gkPoints.withUnsafeMutableBufferPointer { buffer in
+            GKPolygonObstacle(points: buffer.baseAddress!, count: buffer.count)
+        }
     }
 
     private func convexHull(_ points: [SIMD2<Float>]) -> [SIMD2<Float>] {
