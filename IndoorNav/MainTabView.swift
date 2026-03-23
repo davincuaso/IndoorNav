@@ -156,139 +156,159 @@ struct ARTabView: View {
     // MARK: - Top Bar
 
     private var topBar: some View {
-        VStack(spacing: 8) {
-            Picker("Mode", selection: $viewModel.appMode) {
-                ForEach(AppMode.allCases) { mode in
-                    Text(mode.rawValue).tag(mode)
-                }
+        Picker("Mode", selection: $viewModel.appMode) {
+            ForEach(AppMode.allCases) { mode in
+                Text(mode.rawValue).tag(mode)
             }
-            .pickerStyle(.segmented)
         }
-        .padding(.horizontal)
-        .padding(.vertical, 12)
+        .pickerStyle(.segmented)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .background(.ultraThinMaterial)
     }
 
     // MARK: - Mapping Controls
 
     private var mappingControls: some View {
-        VStack(spacing: 10) {
-            // Auto-waypoint toggle + manual waypoint button
-            HStack {
-                Toggle(isOn: $viewModel.isAutoWaypointEnabled) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "point.topleft.down.to.point.bottomright.curvepath.fill")
-                            .foregroundColor(.waypoint)
-                        Text("Auto-Waypoints")
-                            .font(.appCaption)
-                    }
+        VStack(spacing: 6) {
+            // Compact row: waypoints + destination input
+            HStack(spacing: 8) {
+                Toggle("", isOn: $viewModel.isAutoWaypointEnabled)
+                    .toggleStyle(.switch)
+                    .tint(.waypoint)
+                    .labelsHidden()
+                    .scaleEffect(0.8)
+
+                Text("Auto-WP")
+                    .font(.appCaption2)
+
+                if viewModel.waypointCount > 0 {
+                    Text("(\(viewModel.waypointCount))")
+                        .font(.appCaption2)
+                        .foregroundColor(.waypoint)
                 }
-                .toggleStyle(.switch)
-                .tint(.waypoint)
 
                 Spacer()
 
                 Button {
                     dropManualWaypoint()
                 } label: {
-                    Image(systemName: "plus.circle")
-                    Text("WP")
+                    Image(systemName: "plus.circle.fill")
                 }
                 .buttonStyle(.bordered)
                 .tint(.waypoint)
-                .font(.appCaption)
+                .font(.caption)
             }
 
-            if viewModel.waypointCount > 0 {
-                Text("\(viewModel.waypointCount) waypoint\(viewModel.waypointCount == 1 ? "" : "s") placed")
-                    .font(.appCaption2)
-                    .foregroundColor(.waypoint)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            Divider()
-
-            // Destinations
-            if !viewModel.destinations.isEmpty {
-                destinationList
-            }
-
-            HStack(spacing: 10) {
-                TextField("Destination name", text: $anchorName)
+            // Destination input row
+            HStack(spacing: 8) {
+                TextField("Destination", text: $anchorName)
                     .textFieldStyle(.roundedBorder)
                     .autocorrectionDisabled()
+                    .font(.caption)
 
                 Button {
                     dropDestination()
                 } label: {
                     Image(systemName: "mappin.and.ellipse")
-                    Text("Drop")
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.destination)
                 .disabled(anchorName.trimmingCharacters(in: .whitespaces).isEmpty)
             }
 
+            // Destinations list (compact)
+            if !viewModel.destinations.isEmpty {
+                compactDestinationList
+            }
+
             Divider()
 
-            // Zone Selection & Save
+            // Zone Selection & Save (compact)
             if let zone = viewModel.selectedZone {
                 HStack {
-                    Image(systemName: "map.fill")
-                        .foregroundColor(.destination)
                     Text("Zone: \(zone.displayName)")
-                        .font(.appCaption.bold())
+                        .font(.appCaption2.bold())
                     Spacer()
                     Button("Change") {
                         viewModel.selectedZone = nil
                     }
-                    .font(.appCaption)
-                }
+                    .font(.appCaption2)
 
-                Button {
-                    saveMapToZone(zone)
-                } label: {
-                    HStack {
+                    Button {
+                        saveMapToZone(zone)
+                    } label: {
                         if viewModel.isSavingMap {
                             ProgressView().tint(.white)
                         } else {
-                            Image(systemName: "square.and.arrow.down")
+                            Image(systemName: "square.and.arrow.down.fill")
                         }
-                        Text("Save to \"\(zone.displayName)\"")
                     }
-                    .frame(maxWidth: .infinity)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.arrived)
+                    .disabled(!viewModel.canSaveMap || viewModel.isSavingMap)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.arrived)
-                .disabled(!viewModel.canSaveMap || viewModel.isSavingMap)
             } else {
                 ZoneSelectorView(viewModel: viewModel, mode: .mapping) { zone in
                     viewModel.selectZoneForMapping(zone)
                 }
+                .frame(maxHeight: 120)
             }
 
             if let result = viewModel.mapSaveSuccess {
                 Text(result)
-                    .font(.appCaption)
+                    .font(.appCaption2)
                     .foregroundColor(.arrived)
             }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial)
+    }
 
-            if !viewModel.canSaveMap && viewModel.selectedZone != nil {
-                Text("Walk around to build map quality before saving")
-                    .font(.appCaption2)
-                    .foregroundStyle(.secondary)
+    private var compactDestinationList: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(viewModel.destinations, id: \.identifier) { anchor in
+                    HStack(spacing: 2) {
+                        Image(systemName: "mappin.circle.fill")
+                            .foregroundColor(.destination)
+                            .font(.caption2)
+                        Text(anchor.destinationName)
+                            .font(.caption2)
+                        Button {
+                            arManager?.removeAnchor(anchor)
+                            viewModel.removeDestination(anchor)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                                .font(.caption2)
+                        }
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Color.destination.opacity(0.15))
+                    .clipShape(Capsule())
+                }
             }
         }
-        .padding()
-        .background(.ultraThinMaterial)
     }
 
     private func saveMapToZone(_ zone: MapZone) {
         viewModel.beginSavingMap()
 
-        // Save mesh data along with the map
+        // Save mesh data along with the map (requires LiDAR)
+        var meshSaved = false
         if let meshAnchors = arManager?.getMeshAnchors(), !meshAnchors.isEmpty {
-            try? MeshDataStore.shared.saveMeshData(from: meshAnchors, forZone: zone.id)
+            do {
+                try MeshDataStore.shared.saveMeshData(from: meshAnchors, forZone: zone.id)
+                meshSaved = true
+                print("Saved \(meshAnchors.count) mesh anchors for zone \(zone.id)")
+            } catch {
+                print("Failed to save mesh data: \(error)")
+            }
+        } else {
+            print("No mesh anchors available - device may not have LiDAR or scene reconstruction not ready")
         }
 
         arManager?.saveWorldMap(name: zone.mapFileName) { result in
@@ -297,6 +317,10 @@ struct ARTabView: View {
                 case .success(let summary):
                     viewModel.handleMapSavedToZone(summary: summary)
                     HapticManager.shared.mapSaved()
+                    if !meshSaved && viewModel.isSceneReconstructionSupported {
+                        // Mesh should have been available but wasn't
+                        print("Warning: LiDAR supported but no mesh data was saved")
+                    }
                 case .failure(let error):
                     viewModel.handleMapSaveError(error)
                     HapticManager.shared.error()
@@ -324,40 +348,6 @@ struct ARTabView: View {
         }
     }
 
-    // MARK: - Destination List (Mapping)
-
-    private var destinationList: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Destinations (\(viewModel.destinations.count))")
-                .font(.appCaption.bold())
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(viewModel.destinations, id: \.identifier) { anchor in
-                        HStack(spacing: 4) {
-                            Image(systemName: "mappin.circle.fill")
-                                .foregroundColor(.destination)
-                            Text(anchor.destinationName)
-                                .font(.appCaption)
-                            Button {
-                                arManager?.removeAnchor(anchor)
-                                viewModel.removeDestination(anchor)
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundStyle(.secondary)
-                                    .font(.appCaption)
-                            }
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Capsule())
-                    }
-                }
-            }
-        }
-    }
-
     // MARK: - Navigation Controls
 
     private var navigationControls: some View {
@@ -376,7 +366,8 @@ struct ARTabView: View {
                 destinationPicker
             }
         }
-        .padding()
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .background(.ultraThinMaterial)
     }
 
@@ -386,6 +377,7 @@ struct ARTabView: View {
         ZoneSelectorView(viewModel: viewModel, mode: .navigation) { zone in
             loadZone(zone)
         }
+        .frame(maxHeight: 150)
     }
 
     private func loadZone(_ zone: MapZone) {
@@ -396,68 +388,51 @@ struct ARTabView: View {
     // MARK: - Relocalization View
 
     private var relocalizationView: some View {
-        VStack(spacing: 8) {
-            ProgressView()
-                .scaleEffect(1.2)
+        VStack(spacing: 6) {
+            HStack(spacing: 8) {
+                ProgressView()
+                Text("Localizing...")
+                    .font(.appCaption.bold())
+            }
 
-            Text("Look around to localize...")
-                .font(.appSubheadline.bold())
-
-            Text("Point your device at the area you previously mapped. Move slowly and revisit recognizable features.")
+            Text("Point at a previously mapped area")
                 .font(.appCaption2)
                 .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
 
-            if let mapName = viewModel.selectedMapName {
-                Text("Map: \"\(mapName)\" - \(viewModel.loadedDestinations.count) destination\(viewModel.loadedDestinations.count == 1 ? "" : "s")")
-                    .font(.appCaption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            Button("Choose different map") {
+            Button("Different map") {
                 viewModel.showMapPicker = true
             }
-            .font(.appCaption)
+            .font(.appCaption2)
         }
     }
 
     // MARK: - Destination Picker
 
     private var destinationPicker: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
+            // Status row
             HStack {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundColor(.arrived)
-                Text("Localized")
-                    .font(.appCaption.bold())
+                    .font(.caption)
+                Text("Ready")
+                    .font(.appCaption2.bold())
                     .foregroundColor(.arrived)
-                if let name = viewModel.selectedMapName {
-                    Text("(\(name))")
-                        .font(.appCaption2)
-                        .foregroundStyle(.secondary)
-                }
+
                 Spacer()
-                if viewModel.selectedDestination != nil {
-                    Button("Clear") {
-                        arManager?.clearPath()
-                        viewModel.clearNavigation()
-                    }
-                    .font(.appCaption)
+
+                Button("Change Map") {
+                    viewModel.showMapPicker = true
+                    arManager?.clearPath()
+                    viewModel.clearNavigation()
                 }
+                .font(.appCaption2)
             }
 
-            if viewModel.loadedDestinations.isEmpty {
-                Text("No destinations in this map.")
-                    .font(.appCaption)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("Where do you want to go?")
-                    .font(.appCaption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
+            // Destination buttons
+            if !viewModel.loadedDestinations.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         ForEach(viewModel.loadedDestinations, id: \.identifier) { dest in
                             destinationButton(for: dest)
                         }
@@ -465,34 +440,17 @@ struct ARTabView: View {
                 }
             }
 
+            // Distance indicator
             if let dist = viewModel.distanceToDestination,
                let dest = viewModel.selectedDestination {
                 HStack(spacing: 6) {
-                    Image(systemName: "location.fill")
-                        .foregroundColor(.path)
-                    Text(String(format: "\"%@\" - %.1f m", dest.destinationName, dist))
+                    Image(systemName: viewModel.hasArrived ? "checkmark.seal.fill" : "location.fill")
+                        .foregroundColor(viewModel.hasArrived ? .arrived : .path)
+                    Text(viewModel.hasArrived ? "Arrived!" : String(format: "%@ - %.1fm", dest.destinationName, dist))
                         .font(.appCaption.bold())
-                }
-                .padding(.top, 2)
-
-                if viewModel.hasArrived {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.seal.fill")
-                            .foregroundColor(.arrived)
-                        Text("You have arrived!")
-                            .font(.appCaption.bold())
-                            .foregroundColor(.arrived)
-                    }
+                        .foregroundColor(viewModel.hasArrived ? .arrived : .primary)
                 }
             }
-
-            Button("Choose different map") {
-                viewModel.showMapPicker = true
-                arManager?.clearPath()
-                viewModel.clearNavigation()
-            }
-            .font(.appCaption2)
-            .foregroundStyle(.secondary)
         }
     }
 
@@ -528,37 +486,36 @@ struct ARTabView: View {
     // MARK: - Bottom Bar
 
     private var bottomBar: some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 6) {
+        VStack(spacing: 4) {
+            HStack(spacing: 12) {
                 StatusBadge(
                     status: trackingStatus,
-                    text: "Tracking: \(viewModel.trackingStateText)"
+                    text: viewModel.trackingStateText
                 )
-            }
 
-            HStack(spacing: 6) {
                 StatusBadge(
                     status: mappingStatus,
-                    text: "World Map: \(viewModel.worldMappingStatusText)"
+                    text: viewModel.worldMappingStatusText
                 )
-            }
 
-            if viewModel.isSceneReconstructionSupported {
-                HStack(spacing: 6) {
-                    Image(systemName: "viewfinder")
-                        .font(.appCaption2)
-                    Text("LiDAR Active")
-                        .font(.appCaption2)
-                        .foregroundStyle(.secondary)
+                if viewModel.isSceneReconstructionSupported {
+                    let meshCount = arManager?.getMeshAnchors().count ?? 0
+                    HStack(spacing: 3) {
+                        Image(systemName: "viewfinder")
+                        Text("3D: \(meshCount)")
+                    }
+                    .font(.appCaption2)
+                    .foregroundStyle(meshCount > 0 ? .green : .secondary)
                 }
             }
 
             Text(viewModel.sessionInfoText)
                 .font(.appCaption2)
                 .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+                .lineLimit(1)
         }
-        .padding()
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
         .background(.ultraThinMaterial)
     }
