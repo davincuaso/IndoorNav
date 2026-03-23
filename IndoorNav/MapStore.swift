@@ -27,13 +27,28 @@ enum MapStore {
     }
 
     static func load(name: String) throws -> ARWorldMap {
-        let data = try Data(contentsOf: url(for: name))
-        guard let map = try NSKeyedUnarchiver.unarchivedObject(
-            ofClass: ARWorldMap.self, from: data
-        ) else {
-            throw MapStoreError.decodeFailed
+        let fileURL = url(for: name)
+
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            throw MapStoreError.fileNotFound(name)
         }
-        return map
+
+        let data = try Data(contentsOf: fileURL)
+
+        guard !data.isEmpty else {
+            throw MapStoreError.fileCorrupted(name)
+        }
+
+        do {
+            guard let map = try NSKeyedUnarchiver.unarchivedObject(
+                ofClass: ARWorldMap.self, from: data
+            ) else {
+                throw MapStoreError.decodeFailed
+            }
+            return map
+        } catch let error as NSError where error.domain == NSCocoaErrorDomain {
+            throw MapStoreError.fileCorrupted(name)
+        }
     }
 
     static func list() -> [String] {
@@ -73,10 +88,17 @@ enum MapStore {
 
     enum MapStoreError: LocalizedError {
         case decodeFailed
+        case fileNotFound(String)
+        case fileCorrupted(String)
 
         var errorDescription: String? {
             switch self {
-            case .decodeFailed: return "Could not decode the world map file."
+            case .decodeFailed:
+                return "Could not decode the world map file."
+            case .fileNotFound(let name):
+                return "Map \"\(name)\" was not found."
+            case .fileCorrupted(let name):
+                return "Map \"\(name)\" appears to be corrupted."
             }
         }
     }
