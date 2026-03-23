@@ -58,12 +58,17 @@ final class MeshDataStore {
     }
 
     private func createGeometry(from chunk: MeshChunk, colorScheme: MeshColorScheme) -> SCNGeometry {
+        // Convert Vector3 arrays to SIMD3<Float> arrays
+        let simdVertices = chunk.vertices.map { $0.simd }
+        let simdNormals = chunk.normals.map { $0.simd }
+
         // Create vertex source
-        let vertexData = Data(bytes: chunk.vertices, count: chunk.vertices.count * MemoryLayout<SIMD3<Float>>.stride)
+        var vertexArray = simdVertices
+        let vertexData = Data(bytes: &vertexArray, count: vertexArray.count * MemoryLayout<SIMD3<Float>>.stride)
         let vertexSource = SCNGeometrySource(
             data: vertexData,
             semantic: .vertex,
-            vectorCount: chunk.vertices.count,
+            vectorCount: vertexArray.count,
             usesFloatComponents: true,
             componentsPerVector: 3,
             bytesPerComponent: MemoryLayout<Float>.size,
@@ -72,11 +77,12 @@ final class MeshDataStore {
         )
 
         // Create normal source
-        let normalData = Data(bytes: chunk.normals, count: chunk.normals.count * MemoryLayout<SIMD3<Float>>.stride)
+        var normalArray = simdNormals
+        let normalData = Data(bytes: &normalArray, count: normalArray.count * MemoryLayout<SIMD3<Float>>.stride)
         let normalSource = SCNGeometrySource(
             data: normalData,
             semantic: .normal,
-            vectorCount: chunk.normals.count,
+            vectorCount: normalArray.count,
             usesFloatComponents: true,
             componentsPerVector: 3,
             bytesPerComponent: MemoryLayout<Float>.size,
@@ -88,7 +94,7 @@ final class MeshDataStore {
         var colors: [SIMD4<Float>] = []
         let minY = chunk.vertices.map(\.y).min() ?? 0
         let maxY = chunk.vertices.map(\.y).max() ?? 1
-        let range = max(maxY - minY, 0.1)
+        let range = Swift.max(maxY - minY, 0.1)
 
         for vertex in chunk.vertices {
             let normalizedHeight = (vertex.y - minY) / range
@@ -96,7 +102,7 @@ final class MeshDataStore {
             colors.append(color)
         }
 
-        let colorData = Data(bytes: colors, count: colors.count * MemoryLayout<SIMD4<Float>>.stride)
+        let colorData = Data(bytes: &colors, count: colors.count * MemoryLayout<SIMD4<Float>>.stride)
         let colorSource = SCNGeometrySource(
             data: colorData,
             semantic: .color,
@@ -109,7 +115,8 @@ final class MeshDataStore {
         )
 
         // Create element
-        let indexData = Data(bytes: chunk.indices, count: chunk.indices.count * MemoryLayout<UInt32>.size)
+        var indexArray = chunk.indices
+        let indexData = Data(bytes: &indexArray, count: indexArray.count * MemoryLayout<UInt32>.size)
         let element = SCNGeometryElement(
             data: indexData,
             primitiveType: .triangles,
@@ -147,7 +154,8 @@ struct MeshExportData: Codable {
 
             // Update bounding box
             for vertex in chunk.vertices {
-                let worldVertex = anchor.transform * SIMD4<Float>(vertex, 1)
+                let simdVertex = vertex.simd
+                let worldVertex = anchor.transform * SIMD4<Float>(simdVertex.x, simdVertex.y, simdVertex.z, 1)
                 let v = SIMD3<Float>(worldVertex.x, worldVertex.y, worldVertex.z)
                 minPoint = min(minPoint, v)
                 maxPoint = max(maxPoint, v)
@@ -161,39 +169,59 @@ struct MeshExportData: Codable {
 }
 
 struct MeshChunk: Codable {
-    let vertices: [SIMD3<Float>]
-    let normals: [SIMD3<Float>]
+    let vertices: [Vector3]
+    let normals: [Vector3]
     let indices: [UInt32]
-    let transform: simd_float4x4
+    let transformData: [Float]  // 16 floats for 4x4 matrix
+
+    var transform: simd_float4x4 {
+        simd_float4x4(
+            SIMD4<Float>(transformData[0], transformData[1], transformData[2], transformData[3]),
+            SIMD4<Float>(transformData[4], transformData[5], transformData[6], transformData[7]),
+            SIMD4<Float>(transformData[8], transformData[9], transformData[10], transformData[11]),
+            SIMD4<Float>(transformData[12], transformData[13], transformData[14], transformData[15])
+        )
+    }
 
     init(from anchor: ARMeshAnchor) {
         let geometry = anchor.geometry
 
         // Extract vertices
-        var verts: [SIMD3<Float>] = []
+        var verts: [Vector3] = []
         let vertexBuffer = geometry.vertices.buffer.contents()
+        let vertexStride = geometry.vertices.stride
         for i in 0..<geometry.vertices.count {
-            let ptr = vertexBuffer.advanced(by: geometry.vertices.offset + geometry.vertices.stride * i)
+            let ptr = vertexBuffer.advanced(by: vertexStride * i)
             let vertex = ptr.assumingMemoryBound(to: SIMD3<Float>.self).pointee
-            verts.append(vertex)
+            verts.append(Vector3(vertex))
         }
 
         // Extract normals
-        var norms: [SIMD3<Float>] = []
+        var norms: [Vector3] = []
         let normalBuffer = geometry.normals.buffer.contents()
+        let normalStride = geometry.normals.stride
         for i in 0..<geometry.normals.count {
-            let ptr = normalBuffer.advanced(by: geometry.normals.offset + geometry.normals.stride * i)
+            let ptr = normalBuffer.advanced(by: normalStride * i)
             let normal = ptr.assumingMemoryBound(to: SIMD3<Float>.self).pointee
-            norms.append(normal)
+            norms.append(Vector3(normal))
         }
 
         // Extract indices
         var inds: [UInt32] = []
         let faceBuffer = geometry.faces.buffer.contents()
+        let bytesPerIndex = geometry.faces.bytesPerIndex
+        let indicesPerFace = geometry.faces.indexCountPerPrimitive
+
         for i in 0..<geometry.faces.count {
-            for j in 0..<geometry.faces.indexCountPerPrimitive {
-                let ptr = faceBuffer.advanced(by: geometry.faces.offset + (i * geometry.faces.indexCountPerPrimitive + j) * MemoryLayout<UInt32>.size)
-                let index = ptr.assumingMemoryBound(to: UInt32.self).pointee
+            for j in 0..<indicesPerFace {
+                let indexOffset = (i * indicesPerFace + j) * bytesPerIndex
+                let ptr = faceBuffer.advanced(by: indexOffset)
+                let index: UInt32
+                if bytesPerIndex == 4 {
+                    index = ptr.assumingMemoryBound(to: UInt32.self).pointee
+                } else {
+                    index = UInt32(ptr.assumingMemoryBound(to: UInt16.self).pointee)
+                }
                 inds.append(index)
             }
         }
@@ -201,13 +229,59 @@ struct MeshChunk: Codable {
         self.vertices = verts
         self.normals = norms
         self.indices = inds
-        self.transform = anchor.transform
+
+        // Flatten transform matrix
+        let t = anchor.transform
+        self.transformData = [
+            t.columns.0.x, t.columns.0.y, t.columns.0.z, t.columns.0.w,
+            t.columns.1.x, t.columns.1.y, t.columns.1.z, t.columns.1.w,
+            t.columns.2.x, t.columns.2.y, t.columns.2.z, t.columns.2.w,
+            t.columns.3.x, t.columns.3.y, t.columns.3.z, t.columns.3.w
+        ]
+    }
+}
+
+// Codable wrapper for SIMD3<Float>
+struct Vector3: Codable {
+    let x: Float
+    let y: Float
+    let z: Float
+
+    init(_ simd: SIMD3<Float>) {
+        self.x = simd.x
+        self.y = simd.y
+        self.z = simd.z
+    }
+
+    var simd: SIMD3<Float> {
+        SIMD3<Float>(x, y, z)
     }
 }
 
 struct BoundingBox: Codable {
-    let min: SIMD3<Float>
-    let max: SIMD3<Float>
+    let minX: Float
+    let minY: Float
+    let minZ: Float
+    let maxX: Float
+    let maxY: Float
+    let maxZ: Float
+
+    init(min: SIMD3<Float>, max: SIMD3<Float>) {
+        self.minX = min.x
+        self.minY = min.y
+        self.minZ = min.z
+        self.maxX = max.x
+        self.maxY = max.y
+        self.maxZ = max.z
+    }
+
+    var min: SIMD3<Float> {
+        SIMD3<Float>(minX, minY, minZ)
+    }
+
+    var max: SIMD3<Float> {
+        SIMD3<Float>(maxX, maxY, maxZ)
+    }
 
     var center: SIMD3<Float> {
         (min + max) / 2
