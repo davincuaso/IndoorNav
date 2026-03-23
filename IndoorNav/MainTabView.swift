@@ -27,7 +27,7 @@ struct MainTabView: View {
                 .tag(AppTab.scans)
         }
         .tint(.appPrimary)
-        .onChange(of: selectedTab) { _, newTab in
+        .onChange(of: selectedTab) { newTab in
             HapticManager.shared.selectionChanged()
             appState.currentTab = newTab
         }
@@ -85,15 +85,15 @@ struct ARTabView: View {
             arManager?.pauseSession()
             AppState.shared.isARSessionActive = false
         }
-        .onChange(of: viewModel.appMode) { _, newMode in
+        .onChange(of: viewModel.appMode) { newMode in
             handleModeChange(newMode)
         }
-        .onChange(of: viewModel.hasArrived) { _, arrived in
+        .onChange(of: viewModel.hasArrived) { arrived in
             if arrived {
                 HapticManager.shared.arrived()
             }
         }
-        .onChange(of: viewModel.isRelocalized) { _, relocalized in
+        .onChange(of: viewModel.isRelocalized) { relocalized in
             if relocalized {
                 HapticManager.shared.relocalized()
             }
@@ -178,7 +178,7 @@ struct ARTabView: View {
                 Toggle(isOn: $viewModel.isAutoWaypointEnabled) {
                     HStack(spacing: 4) {
                         Image(systemName: "point.topleft.down.to.point.bottomright.curvepath.fill")
-                            .foregroundStyle(.waypoint)
+                            .foregroundColor(.waypoint)
                         Text("Auto-Waypoints")
                             .font(.appCaption)
                     }
@@ -336,7 +336,7 @@ struct ARTabView: View {
                     ForEach(viewModel.destinations, id: \.identifier) { anchor in
                         HStack(spacing: 4) {
                             Image(systemName: "mappin.circle.fill")
-                                .foregroundStyle(.destination)
+                                .foregroundColor(.destination)
                             Text(anchor.destinationName)
                                 .font(.appCaption)
                             Button {
@@ -427,10 +427,10 @@ struct ARTabView: View {
         VStack(spacing: 8) {
             HStack {
                 Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.arrived)
+                    .foregroundColor(.arrived)
                 Text("Localized")
                     .font(.appCaption.bold())
-                    .foregroundStyle(.arrived)
+                    .foregroundColor(.arrived)
                 if let name = viewModel.selectedMapName {
                     Text("(\(name))")
                         .font(.appCaption2)

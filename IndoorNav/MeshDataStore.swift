@@ -298,10 +298,19 @@ struct BoundingBox: Codable {
 
 // MARK: - Color Schemes
 
-enum MeshColorScheme {
+enum MeshColorScheme: Equatable {
     case height
     case solid(UIColor)
     case wireframe
+
+    static func == (lhs: MeshColorScheme, rhs: MeshColorScheme) -> Bool {
+        switch (lhs, rhs) {
+        case (.height, .height): return true
+        case (.wireframe, .wireframe): return true
+        case (.solid(let c1), .solid(let c2)): return c1 == c2
+        default: return false
+        }
+    }
 
     func color(for normalizedHeight: Float) -> SIMD4<Float> {
         switch self {

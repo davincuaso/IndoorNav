@@ -60,15 +60,26 @@ struct ScansTabView: View {
     }
 
     private var emptyState: some View {
-        ContentUnavailableView {
-            Label("No Scans Yet", systemImage: "cube.transparent")
-        } description: {
-            Text("Scans you create in Map mode will appear here. You can view them in 3D and see your mapped destinations.")
-        } actions: {
+        VStack(spacing: 16) {
+            Image(systemName: "cube.transparent")
+                .font(.system(size: 48))
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 4) {
+                Text("No Scans Yet")
+                    .font(.headline)
+
+                Text("Scans you create in Map mode will appear here. You can view them in 3D and see your mapped destinations.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
             Text("Go to the AR tab and start mapping")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+        .padding()
     }
 
     private var scansList: some View {
@@ -189,11 +200,20 @@ struct ScanDetailView: View {
                 }
 
                 if let error = loadError {
-                    ContentUnavailableView {
-                        Label("Unable to Load", systemImage: "exclamationmark.triangle")
-                    } description: {
+                    VStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.orange)
+
+                        Text("Unable to Load")
+                            .font(.headline)
+
                         Text(error)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
                     }
+                    .padding()
                 }
 
                 // Info overlay
