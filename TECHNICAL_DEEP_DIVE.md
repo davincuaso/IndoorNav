@@ -32,25 +32,42 @@ A comprehensive guide to understanding how every part of this AR indoor navigati
    - [Why Straight Lines Don't Work](#why-straight-lines-dont-work)
    - [Auto-Drop Mechanism](#auto-drop-mechanism)
    - [The Waypoint Graph](#the-waypoint-graph)
-8. [Pathfinding — Dijkstra's Algorithm](#8-pathfinding--dijkstras-algorithm)
-   - [Graph Construction](#graph-construction)
-   - [The Algorithm Step by Step](#the-algorithm-step-by-step)
-   - [Path Reconstruction](#path-reconstruction)
-   - [The Virtual Start Node](#the-virtual-start-node)
+8. [Pathfinding — Two-Tier Approach](#8-pathfinding--two-tier-approach)
+   - [Tier 1: Obstacle-Aware Pathfinding (LiDAR)](#tier-1-obstacle-aware-pathfinding-lidar)
+   - [Tier 2: Waypoint-Based Dijkstra (Fallback)](#tier-2-waypoint-based-dijkstra-fallback)
    - [Worked Example](#worked-example)
-9. [Rendering — Drawing 3D Objects in AR](#9-rendering--drawing-3d-objects-in-ar)
-   - [SceneKit and ARSCNView](#scenekit-and-arscnview)
-   - [How Anchor Nodes Are Created](#how-anchor-nodes-are-created)
-   - [Path Dot Rendering](#path-dot-rendering)
-   - [The Render Loop](#the-render-loop)
-10. [The SwiftUI ↔ UIKit Bridge](#10-the-swiftui--uikit-bridge)
+9. [AR Occlusion — Realistic Depth Rendering](#9-ar-occlusion--realistic-depth-rendering)
+   - [How Occlusion Works](#how-occlusion-works)
+   - [Configuring Depth Semantics](#configuring-depth-semantics)
+   - [Material Configuration](#material-configuration)
+10. [Rendering — Drawing 3D Objects in AR](#10-rendering--drawing-3d-objects-in-ar)
+    - [SceneKit and ARSCNView](#scenekit-and-arscnview)
+    - [How Anchor Nodes Are Created](#how-anchor-nodes-are-created)
+    - [Path Rendering Styles](#path-rendering-styles)
+    - [The Render Loop](#the-render-loop)
+11. [3D Scan Viewer — Visualizing Mapped Spaces](#11-3d-scan-viewer--visualizing-mapped-spaces)
+    - [Mesh Data Export](#mesh-data-export)
+    - [SceneKit Reconstruction](#scenekit-reconstruction)
+    - [Height-Based Coloring](#height-based-coloring)
+12. [Zone Management — Multi-Space Organization](#12-zone-management--multi-space-organization)
+    - [Zone Model](#zone-model)
+    - [Zone Store](#zone-store)
+    - [Legacy Migration](#legacy-migration)
+13. [Haptic Feedback — Rich Touch Responses](#13-haptic-feedback--rich-touch-responses)
+    - [CoreHaptics Integration](#corehaptics-integration)
+    - [Feedback Patterns](#feedback-patterns)
+14. [The SwiftUI ↔ UIKit Bridge](#14-the-swiftui--uikit-bridge)
     - [UIViewRepresentable](#uiviewrepresentable)
     - [ObservableObject and @Published](#observableobject-and-published)
-11. [Threading Model](#11-threading-model)
-12. [Complete Data Flow: Mapping to Navigation](#12-complete-data-flow-mapping-to-navigation)
-13. [File-by-File Code Walkthrough](#13-file-by-file-code-walkthrough)
-14. [Key Apple Frameworks Used](#14-key-apple-frameworks-used)
-15. [Glossary](#15-glossary)
+15. [Architecture — MVVM Pattern](#15-architecture--mvvm-pattern)
+    - [ARManager (Session Management)](#armanager-session-management)
+    - [NavigationViewModel (State Container)](#navigationviewmodel-state-container)
+    - [Separation of Concerns](#separation-of-concerns)
+16. [Threading Model](#16-threading-model)
+17. [Complete Data Flow: Mapping to Navigation](#17-complete-data-flow-mapping-to-navigation)
+18. [File-by-File Code Walkthrough](#18-file-by-file-code-walkthrough)
+19. [Key Apple Frameworks Used](#19-key-apple-frameworks-used)
+20. [Glossary](#20-glossary)
 
 ---
 
@@ -461,14 +478,95 @@ These positions form a network. Consecutive waypoints are close together (< 5m),
 
 ---
 
-## 8. Pathfinding — Dijkstra's Algorithm
+## 8. Pathfinding — Two-Tier Approach
 
-### Graph Construction
+The app uses a sophisticated two-tier pathfinding system that adapts to available hardware capabilities.
+
+### Tier 1: Obstacle-Aware Pathfinding (LiDAR)
+
+On devices with LiDAR, the app extracts physical obstacles from the mesh and routes around them using GameplayKit.
+
+#### Mesh Obstacle Extraction
+
+`MeshObstacleExtractor` processes `ARMeshAnchor` data through several stages:
+
+1. **Occupancy Grid Construction:**
+   - Projects mesh vertices onto the floor plane
+   - Creates a 2D grid (10cm resolution) marking occupied cells
+   - Filters by height range (0.1m - 2.0m above floor) to capture furniture/walls
+
+2. **Floor Height Detection:**
+   - Uses percentile analysis of Y-coordinates to find the floor level
+   - Accounts for uneven surfaces and measurement noise
+
+3. **Connected Component Analysis:**
+   - Groups adjacent occupied cells into obstacle regions
+   - Filters out small noise (< 4 cells = 40cm²)
+
+4. **Convex Hull Computation:**
+   - Computes convex hull for each obstacle region
+   - Expands polygons by buffer radius (40cm) for human clearance
+
+```swift
+// Extract obstacles from mesh anchors
+let obstacles = MeshObstacleExtractor.extractObstacles(
+    from: meshAnchors,
+    floorY: estimatedFloorY,
+    bufferRadius: 0.4
+)
+```
+
+#### GKObstacleGraph
+
+GameplayKit's `GKObstacleGraph` provides navigation mesh functionality:
+
+```swift
+obstacleGraph = GKObstacleGraph(
+    obstacles: obstacles,        // [GKPolygonObstacle]
+    bufferRadius: 0.4           // additional clearance
+)
+
+// Connect start and end points to the graph
+let startNode = obstacleGraph.connectToLowestCostNode(
+    node: GKGraphNode2D(point: startPoint),
+    bidirectional: true
+)
+
+// Find path using A*
+let path = obstacleGraph.findPath(from: startNode, to: endNode)
+```
+
+#### Path Smoothing
+
+Raw paths from `GKObstacleGraph` can be jagged. The app applies Catmull-Rom spline interpolation:
+
+```swift
+func smoothPath(_ points: [SIMD3<Float>]) -> [SIMD3<Float>] {
+    var smooth: [SIMD3<Float>] = []
+    for i in 0..<(points.count - 1) {
+        let p0 = points[max(0, i - 1)]
+        let p1 = points[i]
+        let p2 = points[i + 1]
+        let p3 = points[min(points.count - 1, i + 2)]
+
+        for t in stride(from: 0.0, to: 1.0, by: 0.1) {
+            smooth.append(catmullRom(p0, p1, p2, p3, Float(t)))
+        }
+    }
+    return smooth
+}
+```
+
+### Tier 2: Waypoint-Based Dijkstra (Fallback)
+
+When no mesh data is available (non-LiDAR devices or early in session), `PathFinder` uses the classic waypoint approach.
+
+#### Graph Construction
 
 `PathFinder.findPath()` builds a graph where:
 
-- **Nodes:** Every anchor (both waypoints and destinations) plus a virtual "start" node at the user's camera position.
-- **Edges:** Two nodes are connected if they're within 5 meters of each other. The edge weight is the Euclidean distance between them.
+- **Nodes:** Every anchor (waypoints + destinations) plus a virtual "start" node at the camera position.
+- **Edges:** Two nodes are connected if within 5 meters. Edge weight = Euclidean distance.
 
 ```swift
 for i in 0..<n {
@@ -482,79 +580,16 @@ for i in 0..<n {
 }
 ```
 
-Why 5 meters? Because auto-dropped waypoints are 1.5m apart. Consecutive waypoints have a distance of ~1.5m, which is well within 5m. But waypoints on opposite sides of a wall (in different corridors) are typically > 5m apart measured through the wall, so they won't connect. This naturally creates a graph that follows corridors.
+Why 5 meters? Auto-dropped waypoints are 1.5m apart. Consecutive waypoints connect (~1.5m), but waypoints on opposite sides of a wall (different corridors) typically > 5m apart, so they won't connect.
 
-### The Algorithm Step by Step
+#### Dijkstra's Algorithm
 
-Dijkstra's algorithm finds the shortest path from a source node to all other nodes in a weighted graph. Here's what it does:
+1. **Initialize:** Distance to start = 0, all others = infinity. All unvisited.
+2. **Visit nearest unvisited:** Pick node with smallest distance, mark visited.
+3. **Update neighbors:** Calculate distance through current node, update if shorter.
+4. **Repeat** until destination reached or all reachable nodes visited.
 
-1. **Initialize:** Set the distance to the start node as 0, and all other nodes as infinity. Mark all nodes as unvisited.
-
-2. **Visit the nearest unvisited node:** Pick the node with the smallest known distance. Mark it as visited.
-
-3. **Update neighbors:** For each unvisited neighbor of the current node, calculate the distance through the current node. If it's shorter than the previously known distance, update it and record the current node as the predecessor.
-
-4. **Repeat** until you reach the destination (early exit optimization) or all reachable nodes are visited.
-
-```swift
-// Initialization
-var dist = [Float](repeating: .infinity, count: totalNodes)
-var prev = [Int](repeating: -1, count: totalNodes)
-var visited = [Bool](repeating: false, count: totalNodes)
-dist[startIdx] = 0
-
-// Main loop
-for _ in 0..<totalNodes {
-    // Find nearest unvisited
-    var u = -1
-    var best: Float = .infinity
-    for v in 0..<totalNodes where !visited[v] && dist[v] < best {
-        best = dist[v]
-        u = v
-    }
-    guard u != -1 else { break }
-    if u == destIdx { break }  // early exit: reached destination
-    visited[u] = true
-
-    // Relax edges
-    for edge in adj[u] {
-        let newDist = dist[u] + edge.weight
-        if newDist < dist[edge.to] {
-            dist[edge.to] = newDist
-            prev[edge.to] = u
-        }
-    }
-}
-```
-
-**Time complexity:** O(n²) where n is the number of nodes. For a typical office mapping with 50-200 waypoints, this completes in microseconds. A priority-queue version would be O((n + e) log n) but isn't needed at this scale.
-
-### Path Reconstruction
-
-After Dijkstra completes, the `prev` array forms a linked list from destination back to start. We follow it:
-
-```swift
-var path = [SIMD3<Float>]()
-var cur = destIdx
-while cur != -1 {
-    path.append(positions[cur])
-    cur = prev[cur]
-}
-path.reverse()  // now it's start → waypoint → waypoint → ... → destination
-```
-
-The result is an ordered array of 3D positions representing the turn-by-turn route.
-
-### The Virtual Start Node
-
-The user's current position isn't a saved anchor — it changes every frame. So we add a temporary "virtual start node" at the camera position:
-
-```swift
-var positions = anchors.map(\.position)
-positions.append(start)  // virtual start at index n
-```
-
-This node gets connected to all nearby anchors within a generous radius (at least 5m, or 1.5× the distance to the nearest anchor). This ensures the user can always "enter" the waypoint graph from their current position.
+**Time complexity:** O(n²) — fast enough for hundreds of waypoints.
 
 ### Worked Example
 
@@ -586,7 +621,83 @@ User is at position (0.5, 0, 0.2) and wants to go to MeetingRoom.
 
 ---
 
-## 9. Rendering — Drawing 3D Objects in AR
+## 9. AR Occlusion — Realistic Depth Rendering
+
+AR occlusion makes virtual content (like the navigation path) render realistically behind real-world objects. Without occlusion, virtual objects always appear "on top" of everything, breaking the illusion.
+
+### How Occlusion Works
+
+Occlusion relies on **depth information** — knowing how far away each real-world surface is from the camera. On LiDAR devices, ARKit provides dense depth maps. For each pixel, the system knows:
+
+1. **Real-world depth:** How far the physical surface is (from LiDAR).
+2. **Virtual object depth:** How far the rendered geometry is (from SceneKit).
+
+If the real-world surface is closer than the virtual object at a given pixel, the virtual object is hidden (occluded) at that pixel.
+
+### Configuring Depth Semantics
+
+ARKit must be configured to provide depth data:
+
+```swift
+let config = ARWorldTrackingConfiguration()
+
+// Enable LiDAR depth for occlusion
+if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
+    config.frameSemantics.insert(.sceneDepth)
+}
+
+// Enable person segmentation for people occlusion
+if ARWorldTrackingConfiguration.supportsFrameSemantics(.personSegmentationWithDepth) {
+    config.frameSemantics.insert(.personSegmentationWithDepth)
+}
+```
+
+The `.sceneDepth` semantic provides depth from LiDAR scene reconstruction. The `.personSegmentationWithDepth` semantic uses ML to segment people and provide their depth, so people can occlude virtual objects even if they're moving.
+
+### Material Configuration
+
+SceneKit materials must be configured to participate in depth testing:
+
+```swift
+private func configureOcclusionMaterial(_ material: SCNMaterial) {
+    // Read from depth buffer — check if something is in front
+    material.readsFromDepthBuffer = true
+
+    // Write to depth buffer — allow this object to occlude others
+    material.writesToDepthBuffer = true
+
+    // Use alpha blending for semi-transparent occlusion
+    material.blendMode = .alpha
+}
+```
+
+The path renderer applies this to all path geometry:
+
+```swift
+func createChevronGeometry() -> SCNGeometry {
+    let shape = SCNShape(path: chevronPath, extrusionDepth: 0.003)
+    let material = SCNMaterial()
+    material.diffuse.contents = UIColor.systemCyan
+    configureOcclusionMaterial(material)
+    shape.materials = [material]
+    return shape
+}
+```
+
+### Rendering Order
+
+For proper occlusion, virtual content should render after the depth buffer is populated:
+
+```swift
+// Path renders behind real objects
+pathRenderer.rootNode.renderingOrder = -1
+```
+
+A negative `renderingOrder` causes SceneKit to render the path early in the render pass, allowing later-rendered content (real-world reconstruction mesh) to properly occlude it.
+
+---
+
+## 10. Rendering — Drawing 3D Objects in AR
 
 ### SceneKit and ARSCNView
 
@@ -630,32 +741,97 @@ textNode.constraints = [billboard]
 
 For waypoints: smaller yellow semi-transparent spheres (2.5cm radius).
 
-### Path Dot Rendering
+### Path Rendering Styles
 
-The navigation path is rendered as a series of small spheres following the Dijkstra-computed route. The `renderPath` method:
+`PathRenderer` supports three visualization styles, each with distinct characteristics:
 
-1. **Walks each segment** of the path (between consecutive waypoints).
-2. **Places a dot every 25cm** along the segment, using linear interpolation.
-3. **Colors dots with a gradient** — green-cyan near the user, blue-cyan near the destination.
-4. **Uses a cone geometry** for the final dot (arrow indicator).
+#### Chevrons (Default)
+
+Animated arrow shapes that "flow" toward the destination:
 
 ```swift
-for i in 0..<(positions.count - 1) {
-    let segStart = positions[i]
-    let segEnd = positions[i + 1]
-    let segDir = segEnd - segStart
-    let segNorm = simd_normalize(segDir)
+private func renderChevrons(path: [SIMD3<Float>]) {
+    let pathData = interpolateWithDirection(along: path, spacing: chevronSpacing)
 
-    var offset = pathDotSpacing - accumulated
-    while offset <= segLen {
-        let pos = segStart + segNorm * offset  // interpolated position
-        dotPositions.append(pos)
-        offset += pathDotSpacing
+    for (index, data) in pathData.enumerated() {
+        let node = createChevronNode(progress: progress, direction: data.direction)
+        node.simdWorldPosition = data.position
+
+        // Staggered wave animation
+        addPulseAnimation(to: node, index: index, total: totalChevrons)
+        containerNode.addChildNode(node)
     }
 }
 ```
 
-All path dots are children of `pathContainerNode`, which is always attached to the scene root. To redraw the path, we remove all children and add new ones.
+Each chevron is oriented to face its movement direction and pulses in a staggered wave pattern, creating the illusion of motion toward the destination.
+
+#### Dots
+
+Simple spheres placed along the path:
+
+- 12mm radius spheres
+- 15cm spacing
+- Color gradient from cyan (near user) to blue (near destination)
+
+#### Dotted Line
+
+Continuous tubes connecting waypoints:
+
+- 8mm radius cylinders
+- Each segment oriented along the path direction
+- Color gradient based on progress
+
+### Destination Marker
+
+All styles render a pulsing destination marker:
+
+```swift
+private func createDestinationNode() -> SCNNode {
+    let cylinder = SCNCylinder(radius: 0.06, height: 0.15)
+    cylinder.firstMaterial?.diffuse.contents = UIColor.systemGreen
+    cylinder.firstMaterial?.transparency = 0.7
+
+    let node = SCNNode(geometry: cylinder)
+
+    // Pulsing animation
+    let pulse = SCNAction.sequence([
+        .scale(to: 1.3, duration: 0.6),
+        .scale(to: 1.0, duration: 0.6)
+    ])
+    node.runAction(.repeatForever(pulse))
+
+    return node
+}
+```
+
+### Path Interpolation
+
+The path is interpolated to place markers at regular intervals regardless of waypoint spacing:
+
+```swift
+private func interpolateWithDirection(along path: [SIMD3<Float>], spacing: Float) -> [PathPoint] {
+    var result: [PathPoint] = []
+    var accumulated: Float = 0
+
+    for i in 0..<(path.count - 1) {
+        let direction = path[i + 1] - path[i]
+        let length = simd_length(direction)
+        let normalized = simd_normalize(direction)
+
+        var offset = spacing - accumulated
+        while offset <= length {
+            let position = path[i] + normalized * offset
+            result.append(PathPoint(position: position, direction: normalized))
+            offset += spacing
+        }
+        accumulated = length - (offset - spacing)
+    }
+    return result
+}
+```
+
+All path geometry is children of `containerNode`, which is always attached to the scene root. To redraw, we clear all children and add new ones.
 
 ### The Render Loop
 
@@ -679,7 +855,351 @@ We throttle to ~7 updates/second because:
 
 ---
 
-## 10. The SwiftUI ↔ UIKit Bridge
+## 11. 3D Scan Viewer — Visualizing Mapped Spaces
+
+The "My Scans" tab provides an interactive 3D visualization of mapped spaces, allowing users to browse and explore their scans outside of AR.
+
+### Mesh Data Export
+
+When a map is saved, `MeshDataStore` exports the LiDAR mesh data to JSON:
+
+```swift
+struct MeshExportData: Codable {
+    let chunks: [MeshChunk]
+    let boundingBox: BoundingBox
+    let exportDate: Date
+    let destinationCount: Int
+}
+
+struct MeshChunk: Codable {
+    let vertices: [[Float]]      // [[x, y, z], ...]
+    let normals: [[Float]]       // [[nx, ny, nz], ...]
+    let indices: [Int]           // triangle indices
+    let transform: [[Float]]     // 4x4 transform matrix
+}
+```
+
+The export process:
+1. Iterates through all `ARMeshAnchor` instances
+2. Extracts vertex positions, normals, and triangle indices from `ARMeshGeometry`
+3. Converts to Codable structures
+4. Serializes to JSON and saves to `MeshData/<zone-id>.json`
+
+### SceneKit Reconstruction
+
+`ScanViewer3D` reconstructs the mesh in a standalone `SCNView`:
+
+```swift
+func buildMeshNode(from exportData: MeshExportData) -> SCNNode {
+    let containerNode = SCNNode()
+
+    for chunk in exportData.chunks {
+        // Convert vertices to SCNGeometrySource
+        let vertices = chunk.vertices.map { SCNVector3($0[0], $0[1], $0[2]) }
+        let vertexSource = SCNGeometrySource(vertices: vertices)
+
+        // Convert normals
+        let normals = chunk.normals.map { SCNVector3($0[0], $0[1], $0[2]) }
+        let normalSource = SCNGeometrySource(normals: normals)
+
+        // Create triangle elements
+        let indices = chunk.indices.map { Int32($0) }
+        let element = SCNGeometryElement(indices: indices, primitiveType: .triangles)
+
+        // Build geometry
+        let geometry = SCNGeometry(sources: [vertexSource, normalSource], elements: [element])
+        geometry.firstMaterial = createHeightColoredMaterial(for: vertices)
+
+        let node = SCNNode(geometry: geometry)
+        node.simdTransform = chunk.transformMatrix
+        containerNode.addChildNode(node)
+    }
+
+    return containerNode
+}
+```
+
+### Height-Based Coloring
+
+The scan viewer uses a height-based color gradient for visual clarity:
+
+```swift
+func createHeightColoredMaterial(for vertices: [SCNVector3]) -> SCNMaterial {
+    // Compute height range
+    let minY = vertices.min(by: { $0.y < $1.y })?.y ?? 0
+    let maxY = vertices.max(by: { $0.y < $1.y })?.y ?? 1
+    let heightRange = maxY - minY
+
+    // Apply color gradient: blue (low) → cyan → green → yellow (high)
+    let material = SCNMaterial()
+    material.diffuse.contents = UIColor.systemCyan
+    material.lightingModel = .physicallyBased
+
+    return material
+}
+```
+
+The gradient mapping:
+- **Blue** (0.0 - 0.25): Floor level
+- **Cyan** (0.25 - 0.5): Low furniture
+- **Green** (0.5 - 0.75): Mid-height objects
+- **Yellow** (0.75 - 1.0): Tall objects / walls
+
+### Viewer Features
+
+The `ScanViewer3D` component provides:
+
+- **Pan/Rotate/Zoom:** Standard SceneKit camera controls
+- **Wireframe Mode:** Toggle to show mesh structure
+- **Destination Markers:** 3D pins showing destination locations
+- **Floor Grid:** Reference grid for spatial orientation
+- **Mesh Statistics:** Vertex count, bounding box dimensions
+
+---
+
+## 12. Zone Management — Multi-Space Organization
+
+Zones provide a way to organize multiple mapped areas (floors, buildings, rooms) within the app.
+
+### Zone Model
+
+```swift
+struct MapZone: Identifiable, Codable {
+    let id: UUID
+    var name: String
+    var description: String
+    var createdAt: Date
+    var lastModified: Date
+    var destinationCount: Int
+    var waypointCount: Int
+
+    var mapFileName: String {
+        "zone_\(id.uuidString)"
+    }
+
+    var displayName: String {
+        name.isEmpty ? "Untitled Zone" : name
+    }
+}
+```
+
+Each zone has:
+- Unique identifier linking to map and mesh files
+- User-editable name and description
+- Timestamps for sorting and display
+- Anchor counts for summary display
+
+### Zone Store
+
+`ZoneStore` is a singleton managing the zone manifest:
+
+```swift
+@MainActor
+class ZoneStore: ObservableObject {
+    static let shared = ZoneStore()
+
+    @Published private(set) var zones: [MapZone] = []
+
+    private var manifestURL: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("zones.json")
+    }
+
+    func createZone(name: String, description: String = "") -> MapZone {
+        let zone = MapZone(
+            id: UUID(),
+            name: name,
+            description: description,
+            createdAt: Date(),
+            lastModified: Date(),
+            destinationCount: 0,
+            waypointCount: 0
+        )
+        zones.append(zone)
+        saveManifest()
+        return zone
+    }
+
+    func updateZone(_ zone: MapZone, destinationCount: Int, waypointCount: Int) {
+        if let index = zones.firstIndex(where: { $0.id == zone.id }) {
+            zones[index].destinationCount = destinationCount
+            zones[index].waypointCount = waypointCount
+            zones[index].lastModified = Date()
+            saveManifest()
+        }
+    }
+
+    func deleteZone(_ zone: MapZone) {
+        zones.removeAll { $0.id == zone.id }
+        try? MapStore.delete(name: zone.mapFileName)
+        try? MeshDataStore.shared.deleteMeshData(forZone: zone.id)
+        saveManifest()
+    }
+}
+```
+
+### Legacy Migration
+
+When the app launches, `ZoneStore` automatically migrates legacy maps (saved before zone support) into the new system:
+
+```swift
+private func migrateLegacyMaps() {
+    let existingMapNames = MapStore.list()
+    let existingZoneFileNames = Set(zones.map(\.mapFileName))
+
+    for mapName in existingMapNames {
+        // Skip if already migrated
+        guard !existingZoneFileNames.contains(mapName) else { continue }
+        guard !mapName.hasPrefix("zone_") else { continue }
+
+        // Create zone for legacy map
+        let zone = MapZone(
+            id: UUID(),
+            name: mapName,
+            description: "Migrated from legacy format",
+            createdAt: Date(),
+            lastModified: Date(),
+            destinationCount: 0,
+            waypointCount: 0
+        )
+        zones.append(zone)
+
+        // Rename map file to new format
+        try? MapStore.rename(from: mapName, to: zone.mapFileName)
+    }
+}
+```
+
+---
+
+## 13. Haptic Feedback — Rich Touch Responses
+
+The app uses CoreHaptics for rich, contextual haptic feedback throughout the user journey.
+
+### CoreHaptics Integration
+
+`HapticManager` is a singleton that prepares and plays haptic patterns:
+
+```swift
+@MainActor
+final class HapticManager {
+    static let shared = HapticManager()
+
+    private var engine: CHHapticEngine?
+    private let impactLight = UIImpactFeedbackGenerator(style: .light)
+    private let impactMedium = UIImpactFeedbackGenerator(style: .medium)
+    private let impactHeavy = UIImpactFeedbackGenerator(style: .heavy)
+    private let notification = UINotificationFeedbackGenerator()
+    private let selection = UISelectionFeedbackGenerator()
+
+    private init() {
+        prepareGenerators()
+        setupHapticEngine()
+    }
+
+    private func prepareGenerators() {
+        impactLight.prepare()
+        impactMedium.prepare()
+        impactHeavy.prepare()
+        notification.prepare()
+        selection.prepare()
+    }
+
+    private func setupHapticEngine() {
+        guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else { return }
+        do {
+            engine = try CHHapticEngine()
+            try engine?.start()
+        } catch {
+            print("Haptic engine failed: \(error)")
+        }
+    }
+}
+```
+
+### Feedback Patterns
+
+The app provides context-specific haptic feedback:
+
+#### Simple Feedback (UIFeedbackGenerator)
+
+```swift
+func selectionChanged() {
+    selection.selectionChanged()
+}
+
+func waypointDropped() {
+    impactLight.impactOccurred()
+}
+
+func destinationDropped() {
+    impactMedium.impactOccurred()
+}
+
+func error() {
+    notification.notificationOccurred(.error)
+}
+```
+
+#### Custom Patterns (CoreHaptics)
+
+For special moments like arrival, a custom pattern provides a "celebration" feel:
+
+```swift
+func arrived() {
+    // Play notification first
+    notification.notificationOccurred(.success)
+
+    // Then play custom celebration pattern
+    playArrivalPattern()
+}
+
+private func playArrivalPattern() {
+    guard let engine = engine else { return }
+
+    let intensity = CHHapticEventParameter(parameterID: .hapticIntensity, value: 1.0)
+    let sharpness = CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.5)
+
+    // Build celebratory sequence: quick bursts
+    var events: [CHHapticEvent] = []
+    let times: [TimeInterval] = [0, 0.1, 0.2, 0.35, 0.5]
+
+    for time in times {
+        let event = CHHapticEvent(
+            eventType: .hapticTransient,
+            parameters: [intensity, sharpness],
+            relativeTime: time
+        )
+        events.append(event)
+    }
+
+    do {
+        let pattern = try CHHapticPattern(events: events, parameters: [])
+        let player = try engine.makePlayer(with: pattern)
+        try player.start(atTime: 0)
+    } catch {
+        // Fallback to simple feedback
+        notification.notificationOccurred(.success)
+    }
+}
+```
+
+#### Usage Throughout App
+
+| Event | Feedback Type | Pattern |
+|-------|---------------|---------|
+| Mode switch | Selection | Single light tap |
+| Waypoint dropped | Impact (light) | Quick tap |
+| Destination dropped | Impact (medium) | Stronger tap |
+| Destination selected | Impact (light) | Quick tap |
+| Map saved | Notification (success) | Double tap |
+| Relocalized | Notification (success) | Double tap |
+| Arrived | Custom pattern | Celebration burst |
+| Error | Notification (error) | Warning buzz |
+
+---
+
+## 14. The SwiftUI ↔ UIKit Bridge
 
 ### UIViewRepresentable
 
@@ -687,43 +1207,160 @@ We throttle to ~7 updates/second because:
 
 ```swift
 struct ARViewContainer: UIViewRepresentable {
-    let sessionManager: ARSessionManager
+    let arManager: ARManager
 
-    func makeUIView(context: Context) -> ARSCNView {
-        sessionManager.sceneView  // return the existing ARSCNView
+    func makeUIView(context: Context) -> UIView {
+        let container = UIView()
+
+        // Add AR view
+        let arView = arManager.arView
+        arView.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(arView)
+
+        // Add coaching overlay
+        let coachingOverlay = ARCoachingOverlayView()
+        coachingOverlay.session = arManager.arView.session
+        coachingOverlay.goal = .tracking
+        coachingOverlay.activatesAutomatically = true
+        container.addSubview(coachingOverlay)
+
+        return container
     }
 
-    func updateUIView(_ uiView: ARSCNView, context: Context) {}
+    func updateUIView(_ uiView: UIView, context: Context) {}
 }
 ```
 
-This wraps the ARSCNView so SwiftUI can display it. The view is created once (in `ARSessionManager.init()`) and reused — `makeUIView` just returns the existing instance.
+The view wraps both the ARSCNView and ARCoachingOverlayView, providing built-in Apple guidance for tracking quality.
 
 ### ObservableObject and @Published
 
-The session manager uses the Combine framework's `ObservableObject` protocol to bridge AR state to SwiftUI:
+The view model uses Combine's `ObservableObject` protocol to bridge AR state to SwiftUI:
 
 ```swift
-class ARSessionManager: NSObject, ObservableObject {
+@MainActor
+class NavigationViewModel: ObservableObject {
     @Published var trackingState: ARCamera.TrackingState = .notAvailable
     @Published var isRelocalized = false
     @Published var distanceToDestination: Float?
+    @Published var appMode: AppMode = .mapping
     // ...
 }
 ```
 
-Every time a `@Published` property changes, SwiftUI automatically re-renders any view that reads it. For example, when `isRelocalized` changes from `false` to `true`, the ContentView switches from showing the spinner to showing the destination picker — with no manual UI update code.
-
-In `ContentView`:
-
-```swift
-@StateObject private var sessionManager = ARSessionManager()
-// SwiftUI creates this once and keeps it alive for the view's lifetime
-```
+Every time a `@Published` property changes, SwiftUI automatically re-renders any view that reads it.
 
 ---
 
-## 11. Threading Model
+## 15. Architecture — MVVM Pattern
+
+The app follows the Model-View-ViewModel pattern with clear separation of concerns.
+
+### ARManager (Session Management)
+
+`ARManager` owns the AR session lifecycle and SceneKit rendering:
+
+```swift
+final class ARManager: NSObject {
+    private let sceneView: ARSCNView
+    private weak var viewModel: NavigationViewModel?
+    private let pathRenderer = PathRenderer()
+    private let obstaclePathfinder = ObstacleAwarePathfinder()
+
+    var arView: ARSCNView { sceneView }
+
+    func startMappingSession() { ... }
+    func startNavigationSession(mapName: String) { ... }
+    func dropDestination(named: String) -> NavigationAnchor? { ... }
+    func dropWaypoint(named: String) -> (anchor: NavigationAnchor, position: SIMD3<Float>)? { ... }
+    func saveWorldMap(name: String, completion: ...) { ... }
+}
+```
+
+**Responsibilities:**
+- ARKit session configuration and lifecycle
+- Anchor creation and management
+- Mesh tracking for obstacle pathfinding
+- Path rendering via `PathRenderer`
+- SceneKit delegate callbacks
+
+### NavigationViewModel (State Container)
+
+`NavigationViewModel` is the `@MainActor` observable state container:
+
+```swift
+@MainActor
+class NavigationViewModel: ObservableObject {
+    // AR State
+    @Published var trackingState: ARCamera.TrackingState = .notAvailable
+    @Published var worldMappingStatus: ARFrame.WorldMappingStatus = .notAvailable
+    @Published var isRelocalized = false
+
+    // Navigation State
+    @Published var appMode: AppMode = .mapping
+    @Published var selectedDestination: NavigationAnchor?
+    @Published var distanceToDestination: Float?
+
+    // Zone Management
+    @Published var selectedZone: MapZone?
+    @Published var showZoneEditor = false
+
+    // Error Handling
+    @Published var currentError: AppError?
+
+    // Methods
+    func prepareForMappingMode() { ... }
+    func prepareForNavigationMode() { ... }
+    func handleMapLoaded(anchors: ...) { ... }
+    func updateDistance(_ distance: Float) { ... }
+}
+```
+
+**Responsibilities:**
+- All `@Published` state for SwiftUI binding
+- Mode transitions and state cleanup
+- Error handling and recovery
+- Zone management coordination
+- Relocalization timeout tracking
+
+### Separation of Concerns
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      SwiftUI Views                          │
+│  (MainTabView, ARTabView, ScansTabView, ZoneSelectorView)  │
+└─────────────────────────┬───────────────────────────────────┘
+                          │ @StateObject / @ObservedObject
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  NavigationViewModel                        │
+│  (@MainActor, @Published state, UI-facing methods)         │
+└─────────────────────────┬───────────────────────────────────┘
+                          │ weak reference
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      ARManager                              │
+│  (ARKit session, SceneKit rendering, pathfinding)          │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+          ┌───────────────┼───────────────┐
+          ▼               ▼               ▼
+┌─────────────┐   ┌─────────────┐   ┌─────────────┐
+│ PathFinder  │   │ PathRenderer│   │ Obstacle-   │
+│             │   │             │   │ Aware-      │
+│             │   │             │   │ Pathfinder  │
+└─────────────┘   └─────────────┘   └─────────────┘
+```
+
+This architecture:
+- Prevents retain cycles (weak references from ARManager to ViewModel)
+- Keeps UI-facing state isolated in ViewModel
+- Allows independent testing of pathfinding and rendering
+- Makes SwiftUI binding straightforward
+
+---
+
+## 16. Threading Model
 
 ARKit and SceneKit use multiple threads. Understanding the threading is critical for avoiding crashes:
 
@@ -749,7 +1386,7 @@ For the render loop (`renderer(_:updateAtTime:)`), scene graph modifications (ad
 
 ---
 
-## 12. Complete Data Flow: Mapping to Navigation
+## 17. Complete Data Flow: Mapping to Navigation
 
 ### Phase 1: Mapping
 
@@ -836,62 +1473,78 @@ Every 150ms in render loop:
 
 ---
 
-## 13. File-by-File Code Walkthrough
+## 18. File-by-File Code Walkthrough
 
-### `IndoorNavApp.swift` (10 lines)
-The `@main` entry point. Creates a `WindowGroup` containing `ContentView`. Nothing else — the SwiftUI lifecycle handles app launch, backgrounding, etc.
+### App Layer
 
-### `ARViewContainer.swift` (12 lines)
-The thinnest possible `UIViewRepresentable`. Returns the session manager's pre-created `ARSCNView`. No state, no updates.
+**`IndoorNavApp.swift`** — The `@main` entry point. Creates a `WindowGroup` containing `MainTabView`.
 
-### `NavigationAnchor.swift` (75 lines)
-Custom `ARAnchor` subclass. Carries `destinationName` (String) and `kind` (AnchorKind enum). Implements four initializers required by the ARAnchor contract:
-- `init(destinationName:kind:transform:)` — primary initializer used by our code.
-- `override init(name:transform:)` — required by ARAnchor's designated initializer chain.
-- `required init(anchor:)` — ARKit's internal copy contract.
-- `required init?(coder:)` — NSSecureCoding deserialization.
+**`MainTabView.swift`** — Tab container with AR and Scans tabs. Contains `ARTabView` (the main AR navigation interface) and integrates `AppState` singleton for cross-tab coordination.
 
-### `MapStore.swift` (83 lines)
-Stateless utility (enum with static methods). Manages the `IndoorNavMaps` directory. Sorting by modification date so the most recent map appears first in the picker.
+### Views
 
-### `PathFinder.swift` (115 lines)
-Stateless utility. The `findPath` method builds an adjacency list, runs Dijkstra, and reconstructs the path. The `Edge` struct is a simple (destination, weight) pair. Falls back to a straight line if no graph path exists.
+**`ARViewContainer.swift`** — `UIViewRepresentable` wrapping `ARSCNView` and `ARCoachingOverlayView`. Bridges UIKit AR views to SwiftUI.
 
-### `ARSessionManager.swift` (568 lines)
-The largest file and the app's core. Broken into sections:
-- **Published state** (~40 lines) — all reactive state for SwiftUI.
-- **Session lifecycle** (~70 lines) — `startMappingSession()` and `startNavigationSession()`.
-- **Mapping operations** (~50 lines) — drop destinations, drop waypoints, save map.
-- **Navigation operations** (~30 lines) — select destination, clear, recompute path.
-- **Path rendering** (~50 lines) — `clearPath()` and `renderPath()`.
-- **ARSCNViewDelegate** (~100 lines) — 3D node creation for anchors, render loop for path updates.
-- **ARSessionDelegate** (~100 lines) — frame updates, auto-waypoint, tracking state, session errors.
+**`ScansTabView.swift`** — Gallery of mapped zones with `ScanCardView` grid. Shows preview icons, metadata, and links to detail view.
 
-### `ContentView.swift` (481 lines)
-Pure SwiftUI. Broken into computed view properties:
-- `topBar` — segmented mode picker.
-- `mappingControls` — auto-waypoint toggle, destination input, map save.
-- `destinationList` — horizontal scroll of destination chips with delete buttons.
-- `navigationControls` — conditional: map picker → loading → error → relocalization → destination picker.
-- `bottomBar` — tracking status, mapping quality, info text.
-- Status color helpers — map enum values to SwiftUI colors.
+**`ScanViewer3D.swift`** — Interactive SceneKit 3D viewer for mesh data. Supports pan/rotate/zoom, wireframe mode, height-based coloring.
+
+**`ZoneSelectorView.swift`** — Zone picker and editor UI. Contains `ZoneRowView` for list items and `ZoneEditorSheet` for create/edit.
+
+### ViewModels
+
+**`NavigationViewModel.swift`** — The `@MainActor` observable state container. All `@Published` state for SwiftUI, mode transitions, zone management, error handling, and relocalization timeout tracking.
+
+### Services
+
+**`ARManager.swift`** — AR session lifecycle and SceneKit rendering. Manages ARKit configuration, anchor creation, mesh tracking, obstacle graph building, and path rendering coordination.
+
+**`MapStore.swift`** — Stateless utility (enum with static methods). CRUD operations for `IndoorNavMaps` directory. Sorts by modification date.
+
+**`MeshDataStore.swift`** — Exports LiDAR mesh data to JSON for the Scans tab. Reconstructs SceneKit geometry with height-based coloring.
+
+**`PathFinder.swift`** — Waypoint-based Dijkstra pathfinding. Builds adjacency list, runs shortest path algorithm, falls back to straight line if no path exists.
+
+**`ObstacleAwarePathfinder.swift`** — GameplayKit `GKObstacleGraph` integration. Builds navigation mesh from LiDAR obstacles, finds paths using A*, applies Catmull-Rom smoothing.
+
+**`MeshObstacleExtractor.swift`** — Processes `ARMeshAnchor` data into obstacles. Occupancy grid construction, connected component analysis, convex hull computation, polygon expansion.
+
+**`HapticManager.swift`** — CoreHaptics integration. Singleton with prepared feedback generators and custom haptic patterns for arrival celebration.
+
+### Models
+
+**`NavigationAnchor.swift`** — Custom `ARAnchor` subclass with `destinationName` and `kind`. Implements `NSSecureCoding` for world map serialization.
+
+**`MapZone.swift`** — Zone model with metadata. `ZoneStore` singleton manages zone manifest with CRUD operations and legacy migration.
+
+**`AppError.swift`** — Typed errors with user-facing messages, recovery suggestions, and alert titles.
+
+### Rendering
+
+**`PathRenderer.swift`** — Animated path visualization with three styles (chevrons, dots, dotted line). Handles occlusion material configuration and wave animations.
+
+### Design
+
+**`DesignSystem.swift`** — Unified design system with color palette, typography (SF Rounded), view modifiers, and reusable components (`StatusBadge`, `PillButtonStyle`).
 
 ---
 
-## 14. Key Apple Frameworks Used
+## 19. Key Apple Frameworks Used
 
 | Framework | What it provides | How we use it |
 |---|---|---|
-| **ARKit** | Camera tracking, world mapping, anchor management, relocalization | The foundation — everything spatial |
-| **SceneKit** | 3D rendering engine (geometry, materials, animations, scene graph) | Rendering anchor markers and path dots in 3D |
-| **SwiftUI** | Declarative UI framework | All 2D UI overlays (buttons, pickers, status indicators) |
+| **ARKit** | Camera tracking, world mapping, anchor management, relocalization, LiDAR mesh | The foundation — everything spatial, including mesh reconstruction |
+| **SceneKit** | 3D rendering engine (geometry, materials, animations, scene graph) | Rendering anchor markers, navigation path, and 3D scan viewer |
+| **GameplayKit** | Pathfinding (`GKObstacleGraph`, `GKPolygonObstacle`), agent behaviors | Obstacle-aware navigation routing around physical objects |
+| **CoreHaptics** | Rich haptic feedback with custom patterns | Celebration feedback on arrival, contextual touch responses |
+| **SwiftUI** | Declarative UI framework | All 2D UI overlays, tab navigation, zone management |
 | **Combine** | Reactive programming (`@Published`, `ObservableObject`) | Bridging AR state changes to SwiftUI re-renders |
 | **simd** | Hardware-accelerated vector/matrix math | 3D position calculations, distance computations |
-| **Foundation** | File I/O, `NSKeyedArchiver`, `FileManager` | Saving/loading world map files |
+| **Foundation** | File I/O, `NSKeyedArchiver`, `FileManager`, `JSONEncoder` | Map/mesh persistence, zone manifest |
 
 ---
 
-## 15. Glossary
+## 20. Glossary
 
 | Term | Definition |
 |---|---|
@@ -918,3 +1571,14 @@ Pure SwiftUI. Broken into computed view properties:
 | **Waypoint** | A NavigationAnchor (kind: .waypoint) representing a walkable position along a corridor. Not visible to the end user during navigation. |
 | **World coordinate system** | The 3D coordinate space ARKit establishes when a session starts. Origin at the device's initial position, Y-up, units in meters. |
 | **World mapping status** | ARKit's assessment of how thoroughly the current environment has been mapped (.notAvailable → .limited → .extending → .mapped). |
+| **AR Occlusion** | Technique for rendering virtual objects behind real-world surfaces using depth buffer testing. Makes AR content appear realistic. |
+| **ARCoachingOverlayView** | Apple's built-in UI overlay that guides users to improve tracking quality with visual instructions. |
+| **ARMeshAnchor** | An anchor representing a chunk of the LiDAR-reconstructed 3D mesh. Contains vertices, normals, and triangle indices. |
+| **Catmull-Rom spline** | A type of interpolating spline that passes through control points, used to smooth jagged paths. |
+| **CHHapticEngine** | CoreHaptics engine for creating and playing custom haptic patterns beyond simple vibrations. |
+| **Convex hull** | The smallest convex polygon containing a set of points. Used to simplify obstacle shapes for pathfinding. |
+| **GKObstacleGraph** | GameplayKit class that builds a navigation mesh around obstacles for efficient pathfinding. |
+| **GKPolygonObstacle** | GameplayKit obstacle defined by a polygon outline. Pathfinding routes around these shapes. |
+| **Occupancy grid** | A 2D grid where each cell is marked as occupied or free. Used to convert 3D mesh to 2D obstacles. |
+| **sceneDepth** | ARKit frame semantic that provides per-pixel depth information from LiDAR for occlusion rendering. |
+| **Zone** | An organizational unit representing a mapped indoor space. Contains references to map and mesh data files. |

@@ -1,8 +1,20 @@
 # IndoorNav — AR Indoor Navigation
 
-A hardware-free indoor AR navigation app for iOS. An admin maps a physical space by walking through it — the app automatically lays down waypoints along corridors and the admin drops named destination markers at key locations. Users then load that map, relocalize their device, and follow a waypoint-routed AR path to their chosen destination.
+A production-ready, hardware-free indoor AR navigation app for iOS. An admin maps a physical space by walking through it — the app automatically lays down waypoints along corridors and the admin drops named destination markers at key locations. Users then load that map, relocalize their device, and follow an **obstacle-aware AR path** that renders realistically behind real-world objects.
 
-Built with **SwiftUI**, **ARKit**, and **SceneKit**.
+Built with **SwiftUI**, **ARKit**, **SceneKit**, and **GameplayKit**.
+
+---
+
+## Key Features
+
+- **LiDAR-Powered Obstacle Avoidance** — Path routes around walls, furniture, and obstacles using mesh reconstruction
+- **AR Occlusion** — Navigation path renders behind real-world objects for realistic depth
+- **3D Scan Viewer** — Browse and explore your mapped spaces in an interactive 3D viewer
+- **Multi-Zone Support** — Organize maps into named zones (Lobby, Floor 2, Cafeteria)
+- **Animated Path Visualization** — Glowing chevrons that flow toward your destination
+- **Rich Haptic Feedback** — CoreHaptics patterns for all interactions
+- **ARCoachingOverlay** — Built-in Apple guidance for tracking quality
 
 ---
 
@@ -10,6 +22,9 @@ Built with **SwiftUI**, **ARKit**, and **SceneKit**.
 
 - [Requirements](#requirements)
 - [Getting Started](#getting-started)
+- [App Tabs](#app-tabs)
+  - [AR Navigation Tab](#ar-navigation-tab)
+  - [My Scans Tab](#my-scans-tab)
 - [How It Works](#how-it-works)
   - [1. Map the Space (Admin Mode)](#1-map-the-space-admin-mode)
   - [2. Navigate (User Mode)](#2-navigate-user-mode)
@@ -18,10 +33,10 @@ Built with **SwiftUI**, **ARKit**, and **SceneKit**.
   - [Key Classes](#key-classes)
   - [Data Flow](#data-flow)
 - [Technical Details](#technical-details)
-  - [AR Configuration](#ar-configuration)
+  - [AR Configuration & Occlusion](#ar-configuration--occlusion)
   - [Waypoints & Auto-Drop](#waypoints--auto-drop)
-  - [Pathfinding (Dijkstra)](#pathfinding-dijkstra)
-  - [Map Storage](#map-storage)
+  - [Pathfinding (Obstacle-Aware)](#pathfinding-obstacle-aware)
+  - [Map & Mesh Storage](#map--mesh-storage)
   - [Custom Anchor Serialization](#custom-anchor-serialization)
   - [Relocalization](#relocalization)
   - [Path Rendering](#path-rendering)
@@ -38,11 +53,17 @@ Built with **SwiftUI**, **ARKit**, and **SceneKit**.
 |---|---|
 | Xcode | 15.0+ |
 | iOS Deployment Target | 16.0 |
-| Swift | 5.0 |
+| Swift | 5.9 |
 | Device | Physical iPhone or iPad with ARKit support (A9 chip or later) |
-| Optional | LiDAR-equipped device (iPhone 12 Pro+, iPad Pro 2020+) for mesh-based scene reconstruction |
+| Recommended | LiDAR-equipped device (iPhone 12 Pro+, iPad Pro 2020+) for obstacle avoidance and AR occlusion |
 
 ARKit does **not** run in the iOS Simulator. You must build and run on a physical device.
+
+**LiDAR Benefits:**
+- Obstacle-aware pathfinding (routes around walls/furniture)
+- AR occlusion (path renders behind real objects)
+- 3D mesh export for the Scans tab
+- Faster and more accurate relocalization
 
 ---
 
@@ -72,9 +93,35 @@ open IndoorNav.xcodeproj
 
 ---
 
+## App Tabs
+
+The app has two main tabs accessible from the bottom tab bar.
+
+### AR Navigation Tab
+
+The primary interface for mapping and navigating indoor spaces.
+
+- **Map the Space mode**: Walk through a space to create a navigable map with destinations and waypoints
+- **Navigate mode**: Load a saved map, relocalize, and follow the AR path to your destination
+- **Zone Selection**: Create and manage named zones for different areas
+- **Real-time Feedback**: Status indicators for tracking quality, world mapping, and LiDAR status
+
+### My Scans Tab
+
+A gallery of all your mapped zones with interactive 3D visualization.
+
+- **Scan Cards**: Visual grid of all zones with preview icons and metadata
+- **3D Viewer**: Pan, rotate, and zoom your scans in SceneKit
+- **Height Visualization**: Color-coded mesh based on elevation (blue→cyan→green→yellow)
+- **Destination Markers**: See your placed destinations as 3D markers
+- **Mesh Statistics**: View vertex count, bounding box dimensions
+- **Display Options**: Toggle wireframe mode, color schemes, destination visibility
+
+---
+
 ## How It Works
 
-The app has two modes, controlled by a segmented toggle at the top of the screen.
+The AR Navigation tab has two modes, controlled by a segmented toggle at the top of the screen.
 
 ### 1. Map the Space (Admin Mode)
 
@@ -158,34 +205,58 @@ Here's a concrete walkthrough for mapping a typical office floor:
 ### File Overview
 
 ```
-IndoorNav.xcodeproj/
-  project.pbxproj
-
 IndoorNav/
-  IndoorNavApp.swift            @main App entry point (SwiftUI lifecycle)
-  ContentView.swift             Full UI: mode picker, mapping controls, map picker,
-                                navigation controls, status bar
-  ARViewContainer.swift         UIViewRepresentable wrapping ARSCNView
-  ARSessionManager.swift        AR session lifecycle, world map save/load,
-                                waypoint management, relocalization, path rendering
-  NavigationAnchor.swift        Custom ARAnchor subclass (destination + waypoint kinds)
-  PathFinder.swift              Graph construction + Dijkstra shortest-path algorithm
-  MapStore.swift                Multiple named map storage (save/load/list/delete)
-  Info.plist                    Camera permission, ARKit capability, orientation lock
-  Assets.xcassets/              App icon and accent color
+├── App
+│   └── IndoorNavApp.swift           # @main entry point → MainTabView
+│
+├── Views
+│   ├── MainTabView.swift            # Tab container (AR + Scans tabs)
+│   ├── ARViewContainer.swift        # UIViewRepresentable + ARCoachingOverlay
+│   ├── ScansTabView.swift           # 3D scan gallery with cards
+│   ├── ScanViewer3D.swift           # Interactive SceneKit 3D viewer
+│   └── ZoneSelectorView.swift       # Zone picker + editor sheet
+│
+├── ViewModels
+│   └── NavigationViewModel.swift    # @Published state, zone management
+│
+├── Services
+│   ├── ARManager.swift              # AR session, occlusion, mesh tracking
+│   ├── MapStore.swift               # ARWorldMap persistence
+│   ├── MeshDataStore.swift          # 3D mesh export/import for Scans tab
+│   ├── PathFinder.swift             # Dijkstra waypoint routing
+│   ├── ObstacleAwarePathfinder.swift # GKObstacleGraph mesh-based routing
+│   ├── MeshObstacleExtractor.swift  # LiDAR mesh → polygon obstacles
+│   └── HapticManager.swift          # CoreHaptics patterns
+│
+├── Models
+│   ├── NavigationAnchor.swift       # Custom ARAnchor (destination/waypoint)
+│   ├── MapZone.swift                # Zone model + ZoneStore
+│   └── AppError.swift               # Typed errors with recovery
+│
+├── Rendering
+│   └── PathRenderer.swift           # Animated chevrons with occlusion
+│
+└── Design
+    └── DesignSystem.swift           # Colors, fonts, view modifiers
 ```
 
 ### Key Classes
 
-**`ARSessionManager`** — The central manager. Owns the `ARSCNView` and `ARSession`. Handles both mapping (with auto-waypoint dropping) and navigation (with pathfinding-based route rendering). Publishes all state for reactive SwiftUI binding.
+**`ARManager`** — Manages the AR session lifecycle, LiDAR mesh tracking, and obstacle graph building. Configures scene depth for AR occlusion. Coordinates with `NavigationViewModel` for state updates.
 
-**`NavigationAnchor`** — Custom `ARAnchor` subclass with a `destinationName` and a `kind` (`.destination` or `.waypoint`). Implements `NSSecureCoding` for world map serialization.
+**`NavigationViewModel`** — The central `@MainActor` observable state container. Handles mode transitions, zone management, relocalization timeout, and all published properties for SwiftUI binding.
 
-**`PathFinder`** — Static utility that builds a walkable graph from anchors (waypoints + destinations) and runs Dijkstra's algorithm to find the shortest path. Nodes within 5 meters of each other are auto-connected, which works because waypoints are spaced ~1.5m apart.
+**`ObstacleAwarePathfinder`** — Uses GameplayKit's `GKObstacleGraph` to route around physical obstacles detected by LiDAR. Falls back to waypoint-based Dijkstra when no mesh data is available.
 
-**`MapStore`** — Manages multiple named `.arexperience` files in the app's Documents directory. Supports save, load, list (sorted by modification date), delete, and anchor summary.
+**`MeshObstacleExtractor`** — Processes `ARMeshAnchor` data into an occupancy grid, extracts connected components, computes convex hulls, and creates `GKPolygonObstacle` instances for pathfinding.
 
-**`ContentView`** — The root SwiftUI view. Switches between mapping controls (waypoint toggle, destination input, map save) and navigation controls (map picker, relocalization, destination picker, distance readout).
+**`PathRenderer`** — Renders the navigation path with three styles (chevrons, dots, dotted line). Supports animated wave effects, color gradients, and depth buffer reading for AR occlusion.
+
+**`MeshDataStore`** — Exports LiDAR mesh data (vertices, normals, indices) to JSON for the 3D scan viewer. Reconstructs SceneKit geometry with height-based coloring.
+
+**`ZoneStore`** — Singleton managing the zone manifest. Handles CRUD operations, automatic migration of legacy maps, and zone metadata persistence.
+
+**`HapticManager`** — Singleton providing rich haptic feedback using both `UIFeedbackGenerator` and `CoreHaptics` for custom patterns (e.g., arrival celebration).
 
 ### Data Flow
 
@@ -228,13 +299,27 @@ ARSessionManager (@Published state)
 
 ## Technical Details
 
-### AR Configuration
+### AR Configuration & Occlusion
 
 Both modes use `ARWorldTrackingConfiguration` with:
-- **Plane detection:** horizontal and vertical.
-- **Environment texturing:** automatic.
-- **Scene reconstruction:** mesh-based on LiDAR devices (automatic detection).
-- **Debug options:** feature points shown as yellow dots.
+- **Plane detection:** horizontal and vertical
+- **Environment texturing:** automatic
+- **Scene reconstruction:** `.meshWithClassification` on LiDAR devices
+- **Scene depth:** enabled for AR occlusion (`sceneDepth` frame semantics)
+- **Person segmentation:** enabled for people occlusion (`personSegmentationWithDepth`)
+- **Debug options:** feature points shown as yellow dots
+
+**AR Occlusion** makes the navigation path render realistically behind real-world objects:
+```swift
+// ARManager configures depth semantics
+if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
+    config.frameSemantics.insert(.sceneDepth)
+}
+
+// PathRenderer materials read from depth buffer
+material.readsFromDepthBuffer = true
+material.writesToDepthBuffer = true
+```
 
 ### Waypoints & Auto-Drop
 
@@ -246,40 +331,64 @@ Waypoints are lightweight `NavigationAnchor` instances with `kind = .waypoint`. 
 
 Waypoints render as small semi-transparent yellow spheres (2.5cm radius) in AR space — visible to the admin during mapping but unobtrusive.
 
-### Pathfinding (Dijkstra)
+### Pathfinding (Obstacle-Aware)
 
-`PathFinder` builds a graph from all anchors (waypoints + destinations):
+The app uses a two-tier pathfinding system:
 
-1. **Graph construction:** Every pair of anchors within 5 meters of each other gets a bidirectional edge with Euclidean distance as the weight. This radius works well because auto-dropped waypoints are 1.5m apart, so consecutive waypoints always connect.
+#### Tier 1: LiDAR Mesh-Based Routing (ObstacleAwarePathfinder)
 
-2. **Virtual start node:** The user's current camera position is added as a temporary node, connected to all anchors within a generous radius (at least 5m, or 1.5x the distance to the nearest anchor, whichever is larger).
+On LiDAR-equipped devices, the app extracts physical obstacles from the mesh and routes around them:
 
-3. **Dijkstra's algorithm:** Finds the shortest weighted path from the virtual start to the destination anchor. O(n²) implementation, which is fast enough for hundreds of waypoints.
+1. **Mesh extraction:** `MeshObstacleExtractor` processes `ARMeshAnchor` data into an occupancy grid at floor level.
+2. **Obstacle detection:** Connected components in the grid are identified as obstacles. Convex hulls are computed and expanded by a buffer radius.
+3. **GKObstacleGraph:** GameplayKit's `GKObstacleGraph` builds a navigation mesh with `GKPolygonObstacle` instances.
+4. **Path smoothing:** The resulting path is smoothed using Catmull-Rom interpolation for natural curves.
 
+```swift
+obstacleGraph = GKObstacleGraph(
+    obstacles: obstacles,
+    bufferRadius: 0.4  // 40cm buffer for human width
+)
+```
+
+#### Tier 2: Waypoint-Based Dijkstra (Fallback)
+
+When no mesh data is available, `PathFinder` uses the classic approach:
+
+1. **Graph construction:** Every pair of anchors within 5 meters gets a bidirectional edge with Euclidean distance as the weight.
+2. **Virtual start node:** The user's current camera position is added as a temporary node connected to nearby anchors.
+3. **Dijkstra's algorithm:** Finds the shortest weighted path. O(n²) implementation, fast for hundreds of waypoints.
 4. **Fallback:** If no graph path exists (disconnected waypoints), falls back to a straight line.
 
 The result is an ordered array of 3D positions that the path renderer draws through.
 
-### Map Storage
+### Map & Mesh Storage
 
-Maps are saved to:
+Maps and mesh data are saved to the app's Documents directory:
 
 ```
-<App Documents>/IndoorNavMaps/<map-name>.arexperience
+<App Documents>/IndoorNavMaps/<map-name>.arexperience   # ARWorldMap
+<App Documents>/MeshData/<zone-id>.json                  # 3D mesh for Scans tab
+<App Documents>/zones.json                               # Zone manifest
 ```
 
-Each file is a `NSKeyedArchiver`-serialized `ARWorldMap` containing:
+**ARWorldMap files** contain:
 - ARKit's visual feature point cloud
 - Detected planes
 - All `NavigationAnchor` instances (destinations and waypoints)
 - Environment texture data
 
-`MapStore` provides CRUD operations:
-- **Save:** Archives and writes atomically.
-- **Load:** Reads and unarchives with secure coding.
-- **List:** Returns map names sorted by most recently modified.
-- **Delete:** Removes the file.
-- **Summary:** Counts destinations and waypoints in a world map.
+**Mesh data files** (JSON) contain:
+- Vertex positions, normals, and triangle indices
+- Transform matrices for each mesh chunk
+- Bounding box information for visualization
+
+**Zone manifest** tracks:
+- Zone metadata (name, description, timestamps)
+- Destination and waypoint counts
+- References to map files
+
+`MapStore` provides CRUD operations for world maps. `MeshDataStore` handles mesh export/import for the 3D viewer. `ZoneStore` manages the zone manifest with automatic migration of legacy maps.
 
 ### Custom Anchor Serialization
 
@@ -327,11 +436,11 @@ The path follows the Dijkstra-computed waypoint route:
 
 ## Limitations
 
-- **No obstacle avoidance in pathfinding.** Routes follow waypoints, not mesh geometry. If you didn't walk a corridor, there won't be waypoints there, and the path may cut through walls as a fallback.
+- **LiDAR required for obstacle avoidance.** On non-LiDAR devices, paths follow waypoints only. Without sufficient waypoints, paths may take suboptimal routes.
 - **Same-device only.** Maps are stored locally. Sharing between devices would require file export or a backend.
 - **Lighting sensitivity.** Maps created in daylight may not relocalize well at night.
 - **No floor-level clamping.** Path dots follow 3D waypoint positions, which may be at varying heights depending on how the admin held the device.
-- **Single-floor per map.** Each map covers one contiguous area. Multi-floor navigation would require selecting different maps per floor.
+- **Single-floor per zone.** Each zone/map covers one contiguous area. Multi-floor navigation requires selecting different zones per floor.
 - **Portrait orientation only.**
 
 ---
