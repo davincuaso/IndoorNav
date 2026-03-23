@@ -232,7 +232,7 @@ final class MeshObstacleExtractor {
         // Convert to GKPolygonObstacle using UnsafeMutablePointer
         var gkPoints = expandedHull.map { vector_float2($0.x, $0.y) }
         return gkPoints.withUnsafeMutableBufferPointer { buffer in
-            GKPolygonObstacle(points: buffer.baseAddress!, count: buffer.count)
+            GKPolygonObstacle(__points: buffer.baseAddress!, count: buffer.count)
         }
     }
 

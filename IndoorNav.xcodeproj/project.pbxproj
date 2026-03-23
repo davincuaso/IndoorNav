@@ -27,6 +27,7 @@
 		B1B2C3D400000000000B0012 /* ZoneSelectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000000000A0014 /* ZoneSelectorView.swift */; };
 		B1B2C3D400000000000B0013 /* ScansTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000000000A0015 /* ScansTabView.swift */; };
 		B1B2C3D400000000000B0014 /* ScanViewer3D.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000000000A0016 /* ScanViewer3D.swift */; };
+		B1B2C3D400000000000B0015 /* ZoneEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000000000A0017 /* ZoneEditorSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -52,6 +53,7 @@
 		A1B2C3D400000000000A0014 /* ZoneSelectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoneSelectorView.swift; sourceTree = "<group>"; };
 		A1B2C3D400000000000A0015 /* ScansTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScansTabView.swift; sourceTree = "<group>"; };
 		A1B2C3D400000000000A0016 /* ScanViewer3D.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanViewer3D.swift; sourceTree = "<group>"; };
+		A1B2C3D400000000000A0017 /* ZoneEditorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoneEditorSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -95,6 +97,7 @@
 				A1B2C3D400000000000A0014 /* ZoneSelectorView.swift */,
 				A1B2C3D400000000000A0015 /* ScansTabView.swift */,
 				A1B2C3D400000000000A0016 /* ScanViewer3D.swift */,
+				A1B2C3D400000000000A0017 /* ZoneEditorSheet.swift */,
 				A1B2C3D400000000000A0006 /* Assets.xcassets */,
 				A1B2C3D400000000000A0005 /* Info.plist */,
 			);
@@ -197,6 +200,7 @@
 				B1B2C3D400000000000B0012 /* ZoneSelectorView.swift in Sources */,
 				B1B2C3D400000000000B0013 /* ScansTabView.swift in Sources */,
 				B1B2C3D400000000000B0014 /* ScanViewer3D.swift in Sources */,
+				B1B2C3D400000000000B0015 /* ZoneEditorSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
