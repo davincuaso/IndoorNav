@@ -202,7 +202,7 @@ struct ARTabView: View {
             if viewModel.waypointCount > 0 {
                 Text("\(viewModel.waypointCount) waypoint\(viewModel.waypointCount == 1 ? "" : "s") placed")
                     .font(.appCaption2)
-                    .foregroundStyle(.waypoint)
+                    .foregroundColor(.waypoint)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
@@ -235,7 +235,7 @@ struct ARTabView: View {
             if let zone = viewModel.selectedZone {
                 HStack {
                     Image(systemName: "map.fill")
-                        .foregroundStyle(.destination)
+                        .foregroundColor(.destination)
                     Text("Zone: \(zone.displayName)")
                         .font(.appCaption.bold())
                     Spacer()
@@ -270,7 +270,7 @@ struct ARTabView: View {
             if let result = viewModel.mapSaveSuccess {
                 Text(result)
                     .font(.appCaption)
-                    .foregroundStyle(.arrived)
+                    .foregroundColor(.arrived)
             }
 
             if !viewModel.canSaveMap && viewModel.selectedZone != nil {
@@ -469,7 +469,7 @@ struct ARTabView: View {
                let dest = viewModel.selectedDestination {
                 HStack(spacing: 6) {
                     Image(systemName: "location.fill")
-                        .foregroundStyle(.path)
+                        .foregroundColor(.path)
                     Text(String(format: "\"%@\" - %.1f m", dest.destinationName, dist))
                         .font(.appCaption.bold())
                 }
@@ -478,10 +478,10 @@ struct ARTabView: View {
                 if viewModel.hasArrived {
                     HStack(spacing: 4) {
                         Image(systemName: "checkmark.seal.fill")
-                            .foregroundStyle(.arrived)
+                            .foregroundColor(.arrived)
                         Text("You have arrived!")
                             .font(.appCaption.bold())
-                            .foregroundStyle(.arrived)
+                            .foregroundColor(.arrived)
                     }
                 }
             }
