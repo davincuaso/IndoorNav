@@ -262,15 +262,16 @@ extension ARManager: ARSCNViewDelegate {
         if navAnchor.isWaypoint {
             return createWaypointNode()
         } else {
-            let isNavMode = viewModel?.appMode == .navigation
-            return createDestinationNode(for: navAnchor, isNavMode: isNavMode)
+            // Default to mapping mode appearance; will be updated if needed
+            return createDestinationNode(for: navAnchor, isNavMode: false)
         }
     }
 
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
-        guard let viewModel = viewModel else { return }
+        Task { @MainActor [weak self] in
+            guard let self = self,
+                  let viewModel = self.viewModel else { return }
 
-        Task { @MainActor in
             guard viewModel.appMode == .navigation,
                   viewModel.isRelocalized,
                   let destination = viewModel.selectedDestination else {
@@ -347,32 +348,28 @@ extension ARManager: ARSessionDelegate {
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         let mapping = frame.worldMappingStatus
         let tracking = frame.camera.trackingState
+        let col = frame.camera.transform.columns.3
+        let cameraPos = SIMD3<Float>(col.x, col.y, col.z)
 
-        guard let viewModel = viewModel else { return }
+        Task { @MainActor [weak self] in
+            guard let self = self,
+                  let viewModel = self.viewModel else { return }
 
-        // Auto-waypoint logic
-        if viewModel.appMode == .mapping && viewModel.isAutoWaypointEnabled {
-            let col = frame.camera.transform.columns.3
-            let cameraPos = SIMD3<Float>(col.x, col.y, col.z)
-
-            if let lastPos = viewModel.lastAutoWaypointPosition {
-                if simd_length(cameraPos - lastPos) >= viewModel.autoWaypointInterval {
-                    Task { @MainActor in
+            // Auto-waypoint logic
+            if viewModel.appMode == .mapping && viewModel.isAutoWaypointEnabled {
+                if let lastPos = viewModel.lastAutoWaypointPosition {
+                    if simd_length(cameraPos - lastPos) >= viewModel.autoWaypointInterval {
                         let wpCount = viewModel.waypointCount + 1
                         let name = "WP-\(wpCount)"
                         if let result = self.dropWaypoint(named: name) {
                             viewModel.addWaypoint(result.anchor, at: result.position)
                         }
                     }
-                }
-            } else {
-                Task { @MainActor in
+                } else {
                     viewModel.lastAutoWaypointPosition = cameraPos
                 }
             }
-        }
 
-        Task { @MainActor in
             viewModel.updateTrackingState(tracking, mappingStatus: mapping)
         }
     }
@@ -385,12 +382,19 @@ extension ARManager: ARSessionDelegate {
         }
 
         // Build obstacle graph once we have enough mesh data
-        if let viewModel = viewModel,
-           viewModel.appMode == .navigation,
-           viewModel.isRelocalized,
-           !obstaclePathfinder.hasGraph,
-           meshAnchors.count >= 3 {
-            buildObstacleGraph(withWaypoints: viewModel.allLoadedAnchors)
+        let meshCount = meshAnchors.count
+        let hasGraph = obstaclePathfinder.hasGraph
+
+        Task { @MainActor [weak self] in
+            guard let self = self,
+                  let viewModel = self.viewModel else { return }
+
+            if viewModel.appMode == .navigation,
+               viewModel.isRelocalized,
+               !hasGraph,
+               meshCount >= 3 {
+                self.buildObstacleGraph(withWaypoints: viewModel.allLoadedAnchors)
+            }
         }
     }
 
