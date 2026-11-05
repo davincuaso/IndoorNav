@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 256 256" role="img" aria-labelledby="title desc"><title id="title">IndoorNav logo</title><desc id="desc">A floor plan and a route with a destination arrow represent indoor navigation.</desc><rect width="256" height="256" fill="#243F43"/><path d="M58 60h140v136H58Z" fill="none" stroke="#A9C6B0" stroke-width="7" stroke-linejoin="round"/>
+      <path d="M58 108h49V60M198 148h-46v48M153 60v40h45" fill="none" stroke="#A9C6B0" stroke-width="7" stroke-linejoin="round"/>
+      <path d="M84 168h38v-44h42" fill="none" stroke="#E4B86E" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="m153 109 16 15-16 15" fill="none" stroke="#E4B86E" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="84" cy="168" r="10" fill="#F4F2DE"/><circle cx="84" cy="168" r="4" fill="#243F43"/></svg>
