@@ -1,0 +1,24 @@
+[
+  {
+    "image": "screens/screen-01.png",
+    "editable": "screens/screen-01.svg",
+    "caption": "Saved scans",
+    "kind": "recreated",
+    "source_commit": "523795f6ccaa50fea8476f9289afdef5e93e65d2",
+    "source_files": [
+      "IndoorNav/ScansTabView.swift",
+      "IndoorNav/MainTabView.swift"
+    ]
+  },
+  {
+    "image": "screens/screen-02.png",
+    "editable": "screens/screen-02.svg",
+    "caption": "AR mapping controls",
+    "kind": "recreated",
+    "source_commit": "523795f6ccaa50fea8476f9289afdef5e93e65d2",
+    "source_files": [
+      "IndoorNav/MainTabView.swift",
+      "IndoorNav/DesignSystem.swift"
+    ]
+  }
+]
