@@ -8,28 +8,34 @@ permissions:
 jobs:
   capture:
     runs-on: macos-15
-    timeout-minutes: 25
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - key: indoornav
-            repo: IndoorNav
-            ref: 0df48c0cfbf16bbaa50602272a5cba4b588319f1
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
           path: capture-tools
       - uses: actions/checkout@v4
         with:
-          repository: davincuaso/${{ matrix.repo }}
-          ref: ${{ matrix.ref }}
-          path: app
-      - name: Prepare real app sources and sample data
+          repository: davincuaso/Bill-Splitter
+          ref: c160b34544168c749827736b1618276257b88c9a
+          path: sources/splitsmart
+      - uses: actions/checkout@v4
+        with:
+          repository: davincuaso/PantryChef
+          ref: cd3af3dde21a3ad36b6fea1e2a3a4043046f6ce2
+          path: sources/pantrychef
+      - uses: actions/checkout@v4
+        with:
+          repository: davincuaso/PosturePal
+          ref: 63cd03ac11a8a46ba8c3b837f9c53889b99dc5fd
+          path: sources/posturepal
+      - uses: actions/checkout@v4
+        with:
+          repository: davincuaso/IndoorNav
+          ref: 0df48c0cfbf16bbaa50602272a5cba4b588319f1
+          path: sources/indoornav
+      - name: Prepare iPhone simulator
         run: |
           command -v xcodegen || brew install xcodegen
-          python3 capture-tools/docs/portfolio/capture-support/prepare.py ${{ matrix.key }}
-          xcodegen generate --spec project.json
           xcrun simctl list devices available -j > devices.json
           python3 - <<'PY' >> "$GITHUB_ENV"
           import json
@@ -37,25 +43,30 @@ jobs:
           phones=[x for runtime,devices in d['devices'].items() if 'iOS' in runtime for x in devices if x['name'].startswith('iPhone') and x['isAvailable']]
           print('SIMULATOR_ID='+phones[0]['udid'])
           PY
-      - name: Run the apps in an iPhone simulator
+      - name: Capture real native views at full device size
         run: |
           xcrun simctl boot "$SIMULATOR_ID" || true
           xcrun simctl bootstatus "$SIMULATOR_ID" -b
           xcrun simctl status_bar "$SIMULATOR_ID" override --time '9:41' --batteryState charged --batteryLevel 100
-          set -o pipefail
-          xcodebuild test -project PortfolioCapture.xcodeproj -scheme PortfolioCapture -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath capture.xcresult CODE_SIGNING_ALLOWED=NO > build.log 2>&1
-      - name: Export captured screens
-        if: always()
-        run: |
-          mkdir -p screenshots
-          if [ -d capture.xcresult ]; then xcrun xcresulttool export attachments --path capture.xcresult --output-path screenshots || true; fi
-          tail -80 build.log || true
+          failed=0
+          for key in splitsmart pantrychef posturepal indoornav; do
+            rm -rf app CaptureTests PortfolioCapture.xcodeproj
+            cp -R "sources/$key" app
+            mkdir -p "artifacts/$key/screenshots"
+            python3 capture-tools/docs/portfolio/capture-support/prepare.py "$key"
+            xcodegen generate --spec project.json
+            if ! xcodebuild test -project PortfolioCapture.xcodeproj -scheme PortfolioCapture -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath "artifacts/$key/capture.xcresult" CODE_SIGNING_ALLOWED=NO > "artifacts/$key/build.log" 2>&1; then failed=1; fi
+            xcrun xcresulttool export attachments --path "artifacts/$key/capture.xcresult" --output-path "artifacts/$key/screenshots" || true
+            cp project.json "artifacts/$key/project.json"
+            tail -40 "artifacts/$key/build.log"
+          done
+          exit "$failed"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: native-${{ matrix.key }}
+          name: native-apps
           path: |
-            screenshots
-            build.log
-            project.json
+            artifacts/*/screenshots
+            artifacts/*/build.log
+            artifacts/*/project.json
           retention-days: 14
