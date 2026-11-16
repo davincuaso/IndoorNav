@@ -5,6 +5,11 @@ kind=sys.argv[1]
 root=pathlib.Path('app')
 folder={'splitsmart':'SplitSmart','pantrychef':'PantryChef','posturepal':'PosturePal','indoornav':'IndoorNav'}[kind]
 src=root/folder
+# These two legacy files are intentionally absent from IndoorNav's Xcode target.
+# Honor that membership rather than compiling every loose Swift file.
+excludes=['**/Info.plist','**/*.entitlements']
+if kind=='indoornav':
+    excludes += ['ARSessionManager.swift','ContentView.swift']
 def patch(file, old, new):
     p=src/file
     text=p.read_text()
@@ -118,6 +123,6 @@ final class CaptureTests: XCTestCase {
 }
 ''')
 project={'name':'PortfolioCapture','options':{'deploymentTarget':{'iOS':'17.0'}},'settings':{'base':{'SWIFT_VERSION':'5.0','CODE_SIGNING_ALLOWED':'NO','TARGETED_DEVICE_FAMILY':'1','GENERATE_INFOPLIST_FILE':'YES'}},'targets':{
-'CaptureApp':{'type':'application','platform':'iOS','sources':[{'path':str(src),'excludes':['**/Info.plist','**/*.entitlements']}],'settings':{'base':{'PRODUCT_BUNDLE_IDENTIFIER':'com.davincuaso.capture.'+kind,'INFOPLIST_KEY_NSCameraUsageDescription':'Capture app demonstration screens','INFOPLIST_KEY_NSPhotoLibraryUsageDescription':'Choose ingredient photos','INFOPLIST_KEY_NSHealthShareUsageDescription':'Optional posture tracking','INFOPLIST_KEY_NSHealthUpdateUsageDescription':'Optional posture tracking'}}},
+'CaptureApp':{'type':'application','platform':'iOS','sources':[{'path':str(src),'excludes':excludes}],'settings':{'base':{'PRODUCT_BUNDLE_IDENTIFIER':'com.davincuaso.capture.'+kind,'INFOPLIST_KEY_NSCameraUsageDescription':'Capture app demonstration screens','INFOPLIST_KEY_NSPhotoLibraryUsageDescription':'Choose ingredient photos','INFOPLIST_KEY_NSHealthShareUsageDescription':'Optional posture tracking','INFOPLIST_KEY_NSHealthUpdateUsageDescription':'Optional posture tracking'}}},
 'CaptureTests':{'type':'bundle.ui-testing','platform':'iOS','sources':['CaptureTests'],'dependencies':[{'target':'CaptureApp'}],'settings':{'base':{'PRODUCT_BUNDLE_IDENTIFIER':'com.davincuaso.capture.tests.'+kind}}}},'schemes':{'PortfolioCapture':{'build':{'targets':{'CaptureApp':'all','CaptureTests':['test']}},'test':{'targets':['CaptureTests'],'gatherCoverageData':False}}}}
 pathlib.Path('project.json').write_text(json.dumps(project,indent=2))

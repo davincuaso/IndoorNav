@@ -13,15 +13,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - key: splitsmart
-            repo: Bill-Splitter
-            ref: c160b34544168c749827736b1618276257b88c9a
-          - key: pantrychef
-            repo: PantryChef
-            ref: cd3af3dde21a3ad36b6fea1e2a3a4043046f6ce2
-          - key: posturepal
-            repo: PosturePal
-            ref: 63cd03ac11a8a46ba8c3b837f9c53889b99dc5fd
           - key: indoornav
             repo: IndoorNav
             ref: 0df48c0cfbf16bbaa50602272a5cba4b588319f1
