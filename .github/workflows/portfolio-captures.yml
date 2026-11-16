@@ -2,6 +2,7 @@ name: Portfolio native captures
 on:
   push:
     branches: [portfolio-native-captures]
+    paths: ['docs/portfolio/capture-support/**']
   workflow_dispatch:
 permissions:
   contents: read
@@ -48,12 +49,12 @@ jobs:
           xcrun simctl boot "$SIMULATOR_ID" || true
           xcrun simctl bootstatus "$SIMULATOR_ID" -b
           xcrun simctl status_bar "$SIMULATOR_ID" override --time '9:41' --batteryState charged --batteryLevel 100
-          xcrun simctl ui "$SIMULATOR_ID" appearance dark
           failed=0
-          for key in posturepal; do
+          for key in splitsmart pantrychef posturepal indoornav; do
             rm -rf app CaptureTests PortfolioCapture.xcodeproj
             cp -R "sources/$key" app
             mkdir -p "artifacts/$key/screenshots"
+            if [ "$key" = posturepal ]; then xcrun simctl ui "$SIMULATOR_ID" appearance dark; else xcrun simctl ui "$SIMULATOR_ID" appearance light; fi
             python3 capture-tools/docs/portfolio/capture-support/prepare.py "$key"
             xcodegen generate --spec project.json
             if ! xcodebuild test -project PortfolioCapture.xcodeproj -scheme PortfolioCapture -destination "id=$SIMULATOR_ID" -parallel-testing-enabled NO -resultBundlePath "artifacts/$key/capture.xcresult" CODE_SIGNING_ALLOWED=NO > "artifacts/$key/build.log" 2>&1; then failed=1; fi
@@ -65,7 +66,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: native-posturepal-final
+          name: native-apps
           path: |
             artifacts/*/screenshots
             artifacts/*/build.log
