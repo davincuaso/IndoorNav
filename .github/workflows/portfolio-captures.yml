@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   capture:
-    runs-on: macos-15-intel
+    runs-on: macos-15
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -48,8 +48,9 @@ jobs:
           xcrun simctl boot "$SIMULATOR_ID" || true
           xcrun simctl bootstatus "$SIMULATOR_ID" -b
           xcrun simctl status_bar "$SIMULATOR_ID" override --time '9:41' --batteryState charged --batteryLevel 100
+          xcrun simctl ui "$SIMULATOR_ID" appearance dark
           failed=0
-          for key in pantrychef; do
+          for key in posturepal; do
             rm -rf app CaptureTests PortfolioCapture.xcodeproj
             cp -R "sources/$key" app
             mkdir -p "artifacts/$key/screenshots"
@@ -64,7 +65,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: native-pantrychef-final
+          name: native-posturepal-final
           path: |
             artifacts/*/screenshots
             artifacts/*/build.log

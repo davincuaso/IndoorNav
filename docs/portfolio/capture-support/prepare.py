@@ -1,5 +1,5 @@
 """Build-only fixture injection. Original views/renderers remain unchanged."""
-import json, os, pathlib, re, sys
+import json, os, pathlib, plistlib, re, sys
 
 kind=sys.argv[1]
 root=pathlib.Path('app')
@@ -82,6 +82,11 @@ tests={
         wait(app.navigationBars["Summary"])
         shot("02-split-summary")''',
 'posturepal':'''wait(app.navigationBars["PosturePal"])
+        let permission = app.alerts.firstMatch
+        if permission.waitForExistence(timeout: 5) {
+            permission.buttons.element(boundBy: 0).tap()
+        }
+        XCTAssertFalse(app.alerts.firstMatch.exists)
         shot("01-camera-permission")
         app.navigationBars["PosturePal"].buttons.firstMatch.tap()
         wait(app.navigationBars["Settings"])
@@ -126,4 +131,10 @@ final class CaptureTests: XCTestCase {
 project={'name':'PortfolioCapture','options':{'deploymentTarget':{'iOS':'17.0'}},'settings':{'base':{'SWIFT_VERSION':'5.0','CODE_SIGNING_ALLOWED':'NO','TARGETED_DEVICE_FAMILY':'1','GENERATE_INFOPLIST_FILE':'YES','INFOPLIST_KEY_UILaunchScreen_Generation':'YES','INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone':'UIInterfaceOrientationPortrait'}},'targets':{
 'CaptureApp':{'type':'application','platform':'iOS','sources':[{'path':str(src),'excludes':excludes}],'settings':{'base':{'PRODUCT_BUNDLE_IDENTIFIER':'com.davincuaso.capture.'+kind,'INFOPLIST_KEY_NSCameraUsageDescription':'Capture app demonstration screens','INFOPLIST_KEY_NSPhotoLibraryUsageDescription':'Choose ingredient photos','INFOPLIST_KEY_NSHealthShareUsageDescription':'Optional posture tracking','INFOPLIST_KEY_NSHealthUpdateUsageDescription':'Optional posture tracking'}}},
 'CaptureTests':{'type':'bundle.ui-testing','platform':'iOS','sources':['CaptureTests'],'dependencies':[{'target':'CaptureApp'}],'settings':{'base':{'PRODUCT_BUNDLE_IDENTIFIER':'com.davincuaso.capture.tests.'+kind}}}},'schemes':{'PortfolioCapture':{'build':{'targets':{'CaptureApp':'all','CaptureTests':['test']}},'test':{'targets':['CaptureTests'],'gatherCoverageData':False}}}}
+info=src/'Info.plist'
+if info.exists():
+    properties=plistlib.loads(info.read_bytes())
+    for name,value in properties.items():
+        if name.startswith('NS') and name.endswith('UsageDescription'):
+            project['targets']['CaptureApp']['settings']['base']['INFOPLIST_KEY_'+name]=value
 pathlib.Path('project.json').write_text(json.dumps(project,indent=2))
