@@ -1,13 +1,51 @@
 {
-  "status": "awaiting-device-capture",
+  "status": "captured-from-running-app",
   "repository": "IndoorNav",
-  "sourceCommit": "052bd6fb3cb9f3ed303beaed24838c89398f4a3f",
-  "reviewed": "2026-11-16",
-  "screens": [],
-  "reason": "Previous illustrated previews withdrawn. Genuine screenshots or recordings from the running iOS app are required.",
-  "required": [
-    "LiDAR-equipped iPhone or iPad",
-    "Real AR mapping/navigation recording",
-    "Saved 3D mesh in the SceneKit scan viewer"
+  "sourceCommit": "0df48c0cfbf16bbaa50602272a5cba4b588319f1",
+  "captured": "2026-11-16",
+  "environment": "iPhone simulator",
+  "workflowRun": "https://github.com/davincuaso/IndoorNav/actions/runs/43896106879",
+  "method": "The actual ScansTabView and SceneKit ScanViewer3D running in an iPhone simulator. A clearly named Sample room mesh fixture is loaded into the app’s normal mesh store. This is a sample 3D mesh, not a scan made with LiDAR. Live AR mapping, navigation, and LiDAR capture require a physical compatible device.",
+  "screens": [
+    {
+      "src": "screens/capture-01.webp",
+      "caption": "3D viewer · simulator, sample mesh",
+      "label": "Captured from running iOS app",
+      "portrait": true,
+      "alt": "3D viewer · simulator, sample mesh. The actual ScansTabView and SceneKit ScanViewer3D running in an iPhone simulator. A clearly named Sample room mesh fixture is loaded into the app’s normal mesh store. This is a sample 3D mesh, not a scan made with LiDAR. Live AR mapping, navigation, and LiDAR capture require a physical compatible device.",
+      "width": 1206,
+      "height": 2622,
+      "sourceCommit": "0df48c0cfbf16bbaa50602272a5cba4b588319f1",
+      "originalAttachment": {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "C1B4F8AF-9BCC-444D-A13D-4044D04E28DD",
+        "deviceName": "iPhone 16 Pro",
+        "exportedFileName": "54912686-E15C-48F0-A000-8558B1FC16FD.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "02-sample-mesh-viewer_0_FDC57433-8B15-4F6D-86E0-AD50126C8B08.png",
+        "timestamp": 1794843781.871
+      },
+      "originalPngSha256": "207d6ad450024cd7014b3161af49d93710f321e86db461ffa5644718ae00f4e2"
+    },
+    {
+      "src": "screens/capture-02.webp",
+      "caption": "Scan library · simulator, sample room",
+      "label": "Captured from running iOS app",
+      "portrait": true,
+      "alt": "Scan library · simulator, sample room. The actual ScansTabView and SceneKit ScanViewer3D running in an iPhone simulator. A clearly named Sample room mesh fixture is loaded into the app’s normal mesh store. This is a sample 3D mesh, not a scan made with LiDAR. Live AR mapping, navigation, and LiDAR capture require a physical compatible device.",
+      "width": 1206,
+      "height": 2622,
+      "sourceCommit": "0df48c0cfbf16bbaa50602272a5cba4b588319f1",
+      "originalAttachment": {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "C1B4F8AF-9BCC-444D-A13D-4044D04E28DD",
+        "deviceName": "iPhone 16 Pro",
+        "exportedFileName": "55ADC0D6-F531-45A2-A506-B3300C2EEC14.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "01-scan-library_0_223A3AA1-A9C5-4B12-BDAA-A6FA41286311.png",
+        "timestamp": 1794843771.961
+      },
+      "originalPngSha256": "8f316803e452c37aa5ecf6fd302e62e9b17b86f8deac9abfbbf845e00924fa02"
+    }
   ]
 }
