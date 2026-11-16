@@ -1,24 +1,13 @@
-[
-  {
-    "image": "screens/screen-01.png",
-    "editable": "screens/screen-01.svg",
-    "caption": "Saved scans",
-    "kind": "recreated",
-    "source_commit": "523795f6ccaa50fea8476f9289afdef5e93e65d2",
-    "source_files": [
-      "IndoorNav/ScansTabView.swift",
-      "IndoorNav/MainTabView.swift"
-    ]
-  },
-  {
-    "image": "screens/screen-02.png",
-    "editable": "screens/screen-02.svg",
-    "caption": "AR mapping controls",
-    "kind": "recreated",
-    "source_commit": "523795f6ccaa50fea8476f9289afdef5e93e65d2",
-    "source_files": [
-      "IndoorNav/MainTabView.swift",
-      "IndoorNav/DesignSystem.swift"
-    ]
-  }
-]
+{
+  "status": "awaiting-device-capture",
+  "repository": "IndoorNav",
+  "sourceCommit": "052bd6fb3cb9f3ed303beaed24838c89398f4a3f",
+  "reviewed": "2026-11-16",
+  "screens": [],
+  "reason": "Previous illustrated previews withdrawn. Genuine screenshots or recordings from the running iOS app are required.",
+  "required": [
+    "LiDAR-equipped iPhone or iPad",
+    "Real AR mapping/navigation recording",
+    "Saved 3D mesh in the SceneKit scan viewer"
+  ]
+}
