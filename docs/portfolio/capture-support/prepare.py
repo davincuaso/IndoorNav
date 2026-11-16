@@ -1,15 +1,16 @@
 """Build-only fixture injection. Original views/renderers remain unchanged."""
-import json, os, pathlib, sys
+import json, os, pathlib, re, sys
 
 kind=sys.argv[1]
 root=pathlib.Path('app')
 folder={'splitsmart':'SplitSmart','pantrychef':'PantryChef','posturepal':'PosturePal','indoornav':'IndoorNav'}[kind]
 src=root/folder
-# These two legacy files are intentionally absent from IndoorNav's Xcode target.
-# Honor that membership rather than compiling every loose Swift file.
+# Honor the original Xcode app target, including its excluded legacy files.
 excludes=['**/Info.plist','**/*.entitlements']
-if kind=='indoornav':
-    excludes += ['ARSessionManager.swift','ContentView.swift']
+pbx=(root/(folder+'.xcodeproj/project.pbxproj')).read_text()
+members=set(re.findall(r'/\* ([^/]*\.swift) in Sources \*/',pbx))
+assert members, 'Expected explicit Xcode source membership'
+excludes += [str(p.relative_to(src)) for p in src.rglob('*.swift') if p.name not in members]
 def patch(file, old, new):
     p=src/file
     text=p.read_text()

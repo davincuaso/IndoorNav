@@ -49,7 +49,7 @@ jobs:
           xcrun simctl bootstatus "$SIMULATOR_ID" -b
           xcrun simctl status_bar "$SIMULATOR_ID" override --time '9:41' --batteryState charged --batteryLevel 100
           failed=0
-          for key in splitsmart pantrychef posturepal indoornav; do
+          for key in pantrychef; do
             rm -rf app CaptureTests PortfolioCapture.xcodeproj
             cp -R "sources/$key" app
             mkdir -p "artifacts/$key/screenshots"
@@ -64,7 +64,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: native-apps
+          name: native-pantrychef-final
           path: |
             artifacts/*/screenshots
             artifacts/*/build.log
