@@ -1,0 +1,15 @@
+name: Portfolio native captures
+on:
+  push:
+    branches: [portfolio-native-captures]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  environment:
+    runs-on: macos-15
+    steps:
+      - name: Inspect iOS build environment
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available
